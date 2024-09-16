@@ -1,0 +1,69 @@
+profile:
+  id: a3fba186-3f16-446a-bd76-c5791902d456
+  name: outbound-transfer-copy
+gfs:
+  billable: false
+  mdm:
+    nameCompany: x
+    location: US
+    efxId: 00001
+execution:
+  engine: Dataflow
+  mode: batch
+  trigger:
+    type: fileLanding
+sensor:
+  appIds:
+    - GCON1
+    - GBPCAN1
+  pipelineLocation: internal/x-canada-internal/outbound-transfer-copy/inbound
+  headerTrailer:
+    active: true
+    patternRules:
+      filename:
+        - name:  file name rule1
+          description: file name starting with file-transfer
+          priority: 1
+          condition: inputString.startsWith('GBPfvvvhCACON1_CBM.PMvgvgcg.VTL..TRANSFER')
+          actions:
+            - System.out.println('file-transfer');
+retentionPolicy: 2
+notificationDistributionLists:
+  emailLists:
+    - name: success_notification_list
+      from: ${bu['caBatchDl']}
+      to:
+        - bvbhv
+        - abcm 
+        - jdnnv
+    - name: error_notification_list
+      from: ${bu['caBatchDl']}
+      to:
+        - bvbhv
+        - abcm 
+        - jdnnv
+gatekeeper:
+  - name: inbound
+    configFile: inboundFileName.yml
+    id: gk
+    pci: false
+    appId: gbp
+    notifyMissing: false
+  - name: outbound
+    configFile: outboundFileName1.yml
+    id: gk1
+    pci: true
+    appId: hh
+    notifyMissing: false
+    keepExtension: true
+metadata:
+  dagName: tra
+  pre_processing: pre-processing
+dynamicVariables:
+  - type: CONSTANT
+    configuration:
+      # Process
+      pciFlow: "true"
+      cpOrRnm: "rename"
+      outputFileName: "abcd"
+      fromPath: "efgh"
