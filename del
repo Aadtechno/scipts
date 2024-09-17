@@ -67,3 +67,67 @@ dynamicVariables:
       cpOrRnm: "rename"
       outputFileName: "abcd"
       fromPath: "efgh"
+-----
+pipeline {
+    agent {label "cicd-npe-slave0"}
+    parameters {
+        string( name: 'GCS_BUCKET_PATH', defaultValue: 'gs://northamerica-northeast1-ca-gbp-consumer/internal/equifax-canada-internal/outbound-transfer-copy/profile/header.yml', description: 'Full GCS path to the .yml file')
+        string( name: 'APP_ID_SECOND', defaultValue: '', description: 'Second appId value')
+        choice( name: 'PCI_FLOW', choices: ['true', 'false'])
+        choice( name: 'CP_OR_RNM', choices: ['rename', 'copy'])
+        string( name: 'OUTPUT_FILE_NAME', defaultValue: '', description: 'Value for outputFileName')
+        string( name: 'FROM_PATH', defaultValue: '', description: 'Value for fromPath')
+    }
+    environment {
+        GCS_BUCKET_PATH = "${params.GCS_BUCKET_PATH}"
+        LOCAL_YML_FILE = "downloaded.yml"  // Local file name after downloading from GCS
+    }
+    stages {
+        stage('Download .yml file from GCS') {
+            steps {
+                script {
+                    echo "Downloading .yml file from GCS bucket: ${GCS_BUCKET_PATH}"
+                    // Download the specified .yml file from the GCS path
+                    sh "gsutil cp ${GCS_BUCKET_PATH} ./${LOCAL_YML_FILE}"
+
+                }
+            }
+        }
+        stage('Update .yml File') {
+            steps {
+                script {
+                    // Read the downloaded .yml file
+                    def configFile = readFile LOCAL_YML_FILE
+
+                    // Replace placeholders with parameter values
+                    configFile = configFile.replace('${PCI_FLOW}', params.PCI_FLOW)
+                    configFile = configFile.replace('${CP_OR_RNM}', params.CP_OR_RNM)
+                    configFile = configFile.replace('${OUTPUT_FILE_NAME}', params.OUTPUT_FILE_NAME)
+                    configFile = configFile.replace('${FROM_PATH}', params.FROM_PATH)
+                    configFile = configFile.replace('${APP_ID_SECOND}', params.APP_ID_SECOND)
+
+                    echo "Updated .yml file content:"
+                    echo configFile
+
+                    // Write the updated content back to the same file
+                    writeFile file: LOCAL_YML_FILE, text: configFile
+                }
+            }
+        }
+        stage('Upload Updated .yml File to GCS') {
+            steps {
+                script {
+                    echo "Uploading updated .yml file back to GCS bucket: ${GCS_BUCKET_PATH}"
+                    // Upload the updated .yml file to the same GCS path
+                    //sh "gsutil cp ./${LOCAL_YML_FILE} ${GCS_BUCKET_PATH}"
+                    sh "cat ./${LOCAL_YML_FILE}"
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Pipeline completed.'
+        }
+    }
+}
