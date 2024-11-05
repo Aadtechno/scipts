@@ -1,0 +1,16 @@
+for topic in $(gcloud pubsub topics list --format="value(name)"); do
+    echo "IAM Policy for topic $topic:"
+    gcloud pubsub topics get-iam-policy "$topic" --format=json | grep "SERVICE_ACCOUNT"
+done
+
+for subscription in $(gcloud pubsub subscriptions list --format="value(name)"); do
+    echo "IAM Policy for subscription $subscription:"
+    gcloud pubsub subscriptions get-iam-policy "$subscription" --format=json | grep "SERVICE_ACCOUNT"
+done
+
+gcloud pubsub subscriptions get-iam-policy SUBSCRIPTION_NAME --format=json | grep "SERVICE_ACCOUNT"
+
+
+---
+
+gcloud pubsub topics get-iam-policy TOPIC_NAME --format=json | grep "SERVICE_ACCOUNT"
