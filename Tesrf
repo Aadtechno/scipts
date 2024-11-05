@@ -1,0 +1,77 @@
+pipeline {
+    agent none
+
+    parameters {
+        choice(name: 'ENV', choices: ['NPE', 'UAT', 'PROD'], description: 'Select Environment')
+        choice(name: 'ACTION', choices: ['LS', 'COPY'], description: 'Choose the action to perform: LS to list, COPY to copy')
+        string(name: 'ListBucketPath', description: 'GCS bucket path to list files from (used if ACTION is LS)', trim: true)
+        string(name: 'SourceBucketPath', description: 'Source GCS bucket path for copying (used if ACTION is COPY)', trim: true)
+        string(name: 'DestinationBucketPath', description: 'Destination GCS bucket path for copying (used if ACTION is COPY)', trim: true)
+    }
+
+    environment {
+        GOOGLE_APPLICATION_CREDENTIALS = '/path/to/your-service-account-key.json' // Adjust this path if needed
+    }
+
+    stages {
+        stage('Set Environment and Project') {
+            steps {
+                script {
+                    // Define environment-specific settings
+                    if (params.ENV == 'NPE') {
+                        node_label = 'npe-node'
+                        gcp_project = 'your-npe-project-id'
+                    } else if (params.ENV == 'UAT') {
+                        node_label = 'uat-node'
+                        gcp_project = 'your-uat-project-id'
+                    } else if (params.ENV == 'PROD') {
+                        node_label = 'prod-node'
+                        gcp_project = 'your-prod-project-id'
+                    }
+                    echo "Node label set to ${node_label}, GCP Project set to ${gcp_project} for environment ${params.ENV}"
+                }
+            }
+        }
+
+        stage('List Files') {
+            agent { label "${node_label}" }
+            when {
+                expression { params.ACTION == 'LS' }
+            }
+            steps {
+                script {
+                    // Use Google Cloud credentials
+                    withCredentials([file(credentialsId: 'gcs-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                        // List files in the specified bucket path
+                        def listFilesCommand = "gsutil ls ${params.ListBucketPath}"
+                        def fileList = sh(script: listFilesCommand, returnStdout: true).trim()
+
+                        if (fileList) {
+                            echo "Files found in ${params.ListBucketPath}:\n${fileList}"
+                        } else {
+                            echo "No files found in ${params.ListBucketPath}."
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Copy Files') {
+            agent { label "${node_label}" }
+            when {
+                expression { params.ACTION == 'COPY' }
+            }
+            steps {
+                script {
+                    // Use Google Cloud credentials
+                    withCredentials([file(credentialsId: 'gcs-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                        // Copy files from the source bucket to the destination bucket
+                        def copyCommand = "gsutil cp -r ${params.SourceBucketPath} ${params.DestinationBucketPath}"
+                        sh script: copyCommand
+                        echo "Files copied from ${params.SourceBucketPath} to ${params.DestinationBucketPath}"
+                    }
+                }
+            }
+        }
+    }
+}
