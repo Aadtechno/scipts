@@ -1,0 +1,62 @@
+pipeline {
+    agent none
+
+    parameters {
+        choice(name: 'ENV', choices: ['NPW', 'UAT', 'PROD'], description: 'Select Environment')
+        choice(name: 'ACTION', choices: ['LIST', 'COPY'], description: 'Choose the action to perform: LIST to list files, COPY to copy files')
+        string(name: 'ListBucketPath', description: 'GCS bucket path to list files from (used if ACTION is LIST)', trim: true)
+        string(name: 'SourceBucketPath', description: 'Source GCS bucket path for copying (used if ACTION is COPY)', trim: true)
+        string(name: 'DestinationBucketPath', description: 'Destination GCS bucket path for copying (used if ACTION is COPY)', trim: true)
+    }
+
+    environment {
+        // Define GOOGLE_APPLICATION_CREDENTIALS here if needed
+    }
+
+    stages {
+        stage('Set Environment') {
+            steps {
+                script {
+                    // Set the node label and GCP project ID based on the environment selection
+                    if (params.ENV == 'NPW') {
+                        node_label = 'npw-node'
+                        gcp_project = 'npw-project-id'
+                    } else if (params.ENV == 'UAT') {
+                        node_label = 'uat-node'
+                        gcp_project = 'uat-project-id'
+                    } else if (params.ENV == 'PROD') {
+                        node_label = 'prod-node'
+                        gcp_project = 'prod-project-id'
+                    }
+                    echo "Node label set to ${node_label}, GCP Project set to ${gcp_project} for environment ${params.ENV}"
+                }
+            }
+        }
+
+        stage('Perform Action') {
+            agent { label "${node_label}" }
+            steps {
+                script {
+                    if (params.ACTION == 'LIST') {
+                        // Perform the list operation
+                        echo "Listing files in ${params.ListBucketPath} in project ${gcp_project}"
+                        def listFilesCommand = "gsutil ls ${params.ListBucketPath}"
+                        def fileList = sh(script: listFilesCommand, returnStdout: true).trim()
+
+                        if (fileList) {
+                            echo "Files found in ${params.ListBucketPath}:\n${fileList}"
+                        } else {
+                            echo "No files found in ${params.ListBucketPath} or the bucket path is incorrect."
+                        }
+                    } else if (params.ACTION == 'COPY') {
+                        // Perform the copy operation
+                        echo "Copying files from ${params.SourceBucketPath} to ${params.DestinationBucketPath} in project ${gcp_project}"
+                        def copyCommand = "gsutil cp -r ${params.SourceBucketPath} ${params.DestinationBucketPath}"
+                        sh script: copyCommand
+                        echo "Files copied from ${params.SourceBucketPath} to ${params.DestinationBucketPath}"
+                    }
+                }
+            }
+        }
+    }
+}
