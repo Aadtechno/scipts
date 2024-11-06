@@ -1,0 +1,86 @@
+pipeline {
+    agent {
+        label 'dataqa-sa-prd-ca'
+    }
+
+    parameters {
+        string(name: 'DATAFLOW_JAR_URL', defaultValue: '', description: '')
+        string(name: 'STAGE_FILE_1_JAR_URL', defaultValue: '', description: '')
+        string(name: 'STAGE_FILE_2_JAR_URL', defaultValue: '', description: '')
+        string(name: 'GCP_PROJECT_ID', defaultValue: 'migrator-on-cloud-prd-job', description: '')
+        string(name: 'GCP_SA', defaultValue: 'can-sre-pci-prd-0780', description: '')
+        string(name: 'GCP_SA_EMAIL', defaultValue: 'can-sre-pci-prd-0780.iam.gserviceaccount.com', description: '')
+        string(name: 'GCS_INPUT_LOCATION', defaultValue: 'gs://dqa-prd-ca/stage', description: '')
+        string(name: 'BIGQUERY_DATASET', defaultValue: 'dataqa', description: '')
+        string(name: 'MBD_FILE_NAME', defaultValue: 'PSP_CBM_AS.MARKET.ANALYSIS.MDB.F07.D3080919', description: '')
+        string(name: 'TOP_LEVEL_GCP_BUCKET', defaultValue: 'can-sre-pci-prd-0780', description: '')
+        string(name: 'OUTPUT_PROJECT_ID', defaultValue: 'can-sre-pci-prd-0780', description: '')
+        string(name: 'OUTPUT_BUCKET', defaultValue: 'gs://dqa-prd-ca/output', description: '')
+    }
+
+    stages {
+        stage('Execute Dataflow Job') {
+            steps {
+                script {
+                    try {
+                        def dataflowJar = sh(script: "echo ${DATAFLOW_JAR_URL} | rev | cut -f1 -d '/' | rev", returnStdout: true).trim()
+                        def DATE = sh(script: "date +\"%Y-%m-%d_%H-%M-%S\"", returnStdout: true).trim()
+                        def stageFile1Jar = sh(script: "echo ${STAGE_FILE_1_JAR_URL} | rev | cut -f1 -d '/' | rev", returnStdout: true).trim()
+                        def stageFile2Jar = sh(script: "echo ${STAGE_FILE_2_JAR_URL} | rev | cut -f1 -d '/' | rev", returnStdout: true).trim()
+
+                        echo "Dataflow JAR Name: ${dataflowJar}"
+
+                        sh """
+                            echo "Current gcloud configuration is:"
+                            echo "*****************************************"
+                            gcloud config list ;
+                            gcloud config set project can-sre-pci-prd-prd-0780 ;
+                            echo "*****************************************"
+                            java -version ;
+                            gsutil cp ${DATAFLOW_JAR_URL} . ;
+                            gsutil cp ${STAGE_FILE_1_JAR_URL} . ;
+                            gsutil cp ${STAGE_FILE_2_JAR_URL} . ;
+                            java -jar ${dataflowJar} --filesToStage=${stageFile1Jar},${stageFile2Jar} --runner=DataflowRunner --project=${GCP_PROJECT_ID} --region=northamerica-northeast1 --output=${OUTPUT_BUCKET}/${DATE}/output
+                            if [ -e \$? ]; then
+                                echo "Dataflow job execution is triggered.."
+                                date
+                            else
+                                echo "Dataflow job execution failed."
+                                exit 1
+                            fi
+                        """
+                    } catch (Exception e) {
+                        echo "Caught an exception: ${e.getMessage()}"
+                        currentBuild.result = 'FAILURE'
+                        notifyFailure(e.getMessage())
+                    } finally {
+                        echo "Cleaning up resources or performing final steps."
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline completed."
+        }
+        failure {
+            echo "Pipeline failed."
+        }
+        success {
+            echo "Pipeline succeeded."
+        }
+    }
+}
+
+// Define notification function
+def notifyFailure(String errorMessage) {
+    // Example: Send email notification (replace with actual email configuration)
+    mail(
+        to: 'team@example.com',
+        subject: "Jenkins Pipeline Failed",
+        body: "The pipeline failed with the following error:\n\n${errorMessage}\n\nPlease check the Jenkins logs for more details."
+    )
+    // Alternative: Send a Slack notification or other alert here if needed
+}
