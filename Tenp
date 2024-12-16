@@ -1,0 +1,24 @@
+import jenkins.model.*
+
+def searchKeyword = "Your Log Text Here"  // Replace with the log text you're searching for
+def matchedBuilds = []
+
+Jenkins.instance.getAllItems(hudson.model.Job.class).each { job ->
+    job.builds.each { build ->
+        try {
+            def logText = build.getLog(1000).join("\n")  // Fetch the console log (1000 lines)
+            if (logText.contains(searchKeyword)) {
+                matchedBuilds.add("Job: ${job.fullName}, Build: ${build.number}, URL: ${build.url}")
+            }
+        } catch (Exception e) {
+            println("Error reading logs for build: ${build.fullDisplayName}")
+        }
+    }
+}
+
+if (matchedBuilds) {
+    println("Matched Builds:")
+    matchedBuilds.each { println it }
+} else {
+    println("No builds matched the log text.")
+}
