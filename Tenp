@@ -22,3 +22,15 @@ if (matchedBuilds) {
 } else {
     println("No builds matched the log text.")
 }
+-----
+def searchKeyword = "YourKeywordHere" // Replace with your console log keyword
+
+Jenkins.instance.getAllItems(Job.class).each { job ->
+    println "Checking Job: ${job.fullName}"
+    job.getBuilds().each { build ->
+        if (build.logFile.text.contains(searchKeyword)) {
+            println "Keyword found in Job: ${job.fullName}, Build: ${build.number}"
+            println "URL: ${build.absoluteUrl}"
+        }
+    }
+}
