@@ -19,3 +19,11 @@ while read -r PROJECT_ID; do
       2>/dev/null
   done
 done < "$PROJECT_IDS_FILE"
+----
+
+for project in $(cat project_ids.txt); do 
+  for ip in $(cat vm_ips.txt); do 
+    gcloud compute instances list --project="$project" --filter="networkInterfaces.networkIP=$ip" \
+      --format="table(name,zone,internalIP,externalIP,status)"
+  done
+done
