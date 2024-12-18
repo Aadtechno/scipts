@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Input files
+PROJECT_IDS_FILE="project_ids.txt"
+VM_IPS_FILE="vm_ips.txt"
+
+# Read IPs into an array
+mapfile -t VM_IPS < "$VM_IPS_FILE"
+
+# Loop through each project
+while read -r PROJECT_ID; do
+  echo "Fetching VM info for project: $PROJECT_ID"
+
+  for IP in "${VM_IPS[@]}"; do
+    # Get VM info for each IP in the project
+    gcloud compute instances list --project="$PROJECT_ID" \
+      --filter="networkInterfaces.networkIP=$IP" \
+      --format="table(name,zone,internalIP,externalIP,status)" \
+      2>/dev/null
+  done
+done < "$PROJECT_IDS_FILE"
