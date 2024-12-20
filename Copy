@@ -20,3 +20,16 @@ do
 done < "$FILE_PATHS"
 
 echo "All files copied to $DEST"
+-----
+#!/bin/bash
+
+# Destination bucket or folder
+DEST="gs://destination-bucket/destination-folder/"
+
+# File containing the list of GCS file paths (one per line)
+FILE_PATHS="files.txt"
+
+# Loop through each file and copy it
+while read -r file; do
+  gcloud storage cp "$file" "$DEST"
+done < "$FILE_PATHS"
