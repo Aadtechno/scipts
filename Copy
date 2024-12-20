@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Define the destination bucket or folder
+DEST="gs://destination-bucket/destination-folder/"
+
+# File containing the list of GCS file paths (one per line)
+FILE_PATHS="files.txt"
+
+# Check if the file list exists
+if [ ! -f "$FILE_PATHS" ]; then
+  echo "File list $FILE_PATHS not found!"
+  exit 1
+fi
+
+# Copy each file to the destination
+while IFS= read -r file
+do
+  echo "Copying $file to $DEST"
+  gsutil cp "$file" "$DEST"
+done < "$FILE_PATHS"
+
+echo "All files copied to $DEST"
