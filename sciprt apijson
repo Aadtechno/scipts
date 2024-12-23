@@ -75,3 +75,87 @@ pipeline {
         }
     }
 }
+----
+pipeline {
+    agent {
+        label 'npe'
+    }
+    options {
+        disableConcurrentBuilds()
+    }
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['npe', 'uat', 'prod'], description: 'Select the environment to trigger API')
+        text(name: 'CUSTOMER_LIST', defaultValue: '', description: 'Enter multiple customer names separated by commas')
+        string(name: 'BU', defaultValue: '', description: 'Business Unit')
+        string(name: 'PARENT', defaultValue: '', description: 'Parent DAG Folder')
+    }
+    stages {
+        stage('Generate OAuth 2.0 Token') {
+            steps {
+                script {
+                    def oauthUrl = ''
+                    def requestBody = ''
+
+                    if (params.ENVIRONMENT == 'npe') {
+                        withCredentials([usernamePassword(credentialsId: 'NPE-OAUTH', passwordVariable: 'CLIENT_SECRET', usernameVariable: 'CLIENT_ID')]) {
+                            oauthUrl = "https://npe-auth-url.com/as/token.oauth2"
+                            requestBody = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+                        }
+                    } else {
+                        withCredentials([usernamePassword(credentialsId: 'UAT-PROD-OAUTH', passwordVariable: 'CLIENT_SECRET', usernameVariable: 'CLIENT_ID')]) {
+                            oauthUrl = "https://uat-prod-auth-url.com/as/token.oauth2"
+                            requestBody = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+                        }
+                    }
+
+                    def accessToken = sh(script: "curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d '${requestBody}' ${oauthUrl} | jq -r '.access_token'", returnStdout: true).trim()
+
+                    if (accessToken) {
+                        currentBuild.description = "OAuth Token Request Successful"
+                        env.ACCESS_TOKEN = accessToken
+                    } else {
+                        error("Failed to obtain OAuth token")
+                    }
+                }
+            }
+        }
+
+        stage('Trigger API Calls in Bulk') {
+            steps {
+                script {
+                    def apiUrl = ''
+
+                    switch (params.ENVIRONMENT) {
+                        case 'npe':
+                            apiUrl = "https://npe-api-url.com/unpublish"
+                            break
+                        case 'uat':
+                            apiUrl = "https://uat-api-url.com/unpublish"
+                            break
+                        case 'prod':
+                            apiUrl = "https://prod-api-url.com/unpublish"
+                            break
+                    }
+
+                    def customers = params.CUSTOMER_LIST.split(',')
+
+                    customers.each { customer ->
+                        customer = customer.trim()
+                        def jsonPayload = """
+                        {
+                            \"customer\": \"${customer}\",
+                            \"bu\": \"${params.BU}\",
+                            \"parentDAGFolder\": \"${params.PARENT}\"
+                        }
+                        """
+
+                        def response = sh(script: "curl -X POST '${apiUrl}' -H 'Content-Type: application/json' -H 'Authorization: Bearer ${env.ACCESS_TOKEN}' -d '${jsonPayload}' -k", returnStdout: true).trim()
+
+                        echo "Response for customer ${customer}: ${response}"
+                    }
+                }
+            }
+        }
+    }
+}
+
