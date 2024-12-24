@@ -10,19 +10,16 @@ pipeline {
         stage('Download and Display Source File') {
             steps {
                 script {
-                    sh '''
-                    echo "Downloading source_file.txt from $SOURCE_FILE_GCS"
-                    gcloud storage cp "$SOURCE_FILE_GCS" source_file.txt
+                    println "Downloading source_file.txt from ${SOURCE_FILE_GCS}"
+                    def downloadCmd = "gcloud storage cp ${SOURCE_FILE_GCS} source_file.txt"
+                    def result = sh(script: downloadCmd, returnStatus: true)
 
-                    # Verify the file was downloaded successfully
-                    if [[ ! -f "source_file.txt" ]]; then
-                        echo "Error: Failed to download $SOURCE_FILE_GCS"
-                        exit 1
-                    fi
+                    if (result != 0) {
+                        error "Error: Failed to download ${SOURCE_FILE_GCS}"
+                    }
 
-                    echo "Contents of source_file.txt:"
-                    cat source_file.txt
-                    '''
+                    println "Contents of source_file.txt:"
+                    sh "cat source_file.txt"
                 }
             }
         }
@@ -30,25 +27,23 @@ pipeline {
         stage('List Each Source File') {
             steps {
                 script {
-                    sh '''
-                    echo "Listing and verifying files from source_file.txt"
+                    println "Listing and verifying files from source_file.txt"
 
-                    # Iterate over each file path and list its details
-                    for source_file in $(cat source_file.txt); do
-                        if [[ -n "$source_file" ]]; then
-                            echo "Listing $source_file"
-                            gsutil ls -l "$source_file"
+                    def fileList = readFile('source_file.txt').readLines()
+                    fileList.each { sourceFile ->
+                        if (sourceFile.trim()) { // Ensure the line is not empty
+                            println "Listing ${sourceFile}"
 
-                            # Check if the file exists
-                            if [[ $? -ne 0 ]]; then
-                                echo "Error: $source_file does not exist or cannot be accessed"
-                                exit 1
-                            fi
-                        fi
-                    done
+                            def listCmd = "gsutil ls -l ${sourceFile}"
+                            def result = sh(script: listCmd, returnStatus: true)
 
-                    echo "All files verified successfully."
-                    '''
+                            if (result != 0) {
+                                error "Error: ${sourceFile} does not exist or cannot be accessed"
+                            }
+                        }
+                    }
+
+                    println "All source files verified successfully."
                 }
             }
         }
@@ -56,25 +51,23 @@ pipeline {
         stage('Copy Files to Destination') {
             steps {
                 script {
-                    sh '''
-                    echo "Copying files to $DESTINATION_BUCKET"
+                    println "Copying files to ${DESTINATION_BUCKET}"
 
-                    # Read and copy each file to the destination
-                    for source_file in $(cat source_file.txt); do
-                        if [[ -n "$source_file" ]]; then
-                            echo "Copying $source_file to $DESTINATION_BUCKET"
-                            gsutil cp "$source_file" "$DESTINATION_BUCKET"
+                    def fileList = readFile('source_file.txt').readLines()
+                    fileList.each { sourceFile ->
+                        if (sourceFile.trim()) { // Ensure the line is not empty
+                            println "Copying ${sourceFile} to ${DESTINATION_BUCKET}"
 
-                            # Check if the copy was successful
-                            if [[ $? -ne 0 ]]; then
-                                echo "Error: Failed to copy $source_file"
-                                exit 1
-                            fi
-                        fi
-                    done
+                            def copyCmd = "gsutil cp ${sourceFile} ${DESTINATION_BUCKET}"
+                            def result = sh(script: copyCmd, returnStatus: true)
 
-                    echo "All files copied successfully."
-                    '''
+                            if (result != 0) {
+                                error "Error: Failed to copy ${sourceFile}"
+                            }
+                        }
+                    }
+
+                    println "All files copied successfully."
                 }
             }
         }
@@ -82,15 +75,15 @@ pipeline {
         stage('Verify Destination') {
             steps {
                 script {
-                    sh '''
-                    echo "Verifying files in $DESTINATION_BUCKET"
+                    println "Verifying files in ${DESTINATION_BUCKET}"
 
-                    # List all files in the destination bucket
-                    gsutil ls -l "$DESTINATION_BUCKET"
+                    // List all files in the destination bucket
+                    def listDestCmd = "gsutil ls -l ${DESTINATION_BUCKET}"
+                    sh(script: listDestCmd)
 
-                    # Display the total size of the files in the destination bucket
-                    gsutil du -s "$DESTINATION_BUCKET"
-                    '''
+                    // Display the total size of the files in the destination bucket
+                    def duDestCmd = "gsutil du -s ${DESTINATION_BUCKET}"
+                    sh(script: duDestCmd)
                 }
             }
         }
