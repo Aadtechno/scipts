@@ -4,7 +4,7 @@
 SOURCE_FILE_LIST="source_files.txt"
 
 # Define the destination GCS bucket path
-DESTINATION_BUCKET="gs://megkxv/test/"
+DESTINATION_BUCKET="gs:"
 
 # Check if the source file list exists
 if [[ ! -f "$SOURCE_FILE_LIST" ]]; then
@@ -35,29 +35,22 @@ pipeline {
     agent any
 
     environment {
-        SOURCE_FILE_LIST = "source_files.txt" // File containing source GCS file paths
-        DESTINATION_BUCKET = "gs://megkxv/test/" // Destination GCS bucket
+        SOURCE_FILE_LIST_GCS = "gs://your-bucket/source_files.txt" // GCS path of the source file
+        DESTINATION_BUCKET = "" // Destination GCS bucket
     }
 
     stages {
         stage('Copy Files') {
             steps {
                 script {
-                    // Main copying logic
+                    // Download and directly process the source file list
                     sh '''
-                    # Check if the source file list exists
-                    if [[ ! -f "$SOURCE_FILE_LIST" ]]; then
-                        echo "Error: File $SOURCE_FILE_LIST not found!"
-                        exit 1
-                    fi
+                    echo "Downloading and processing $SOURCE_FILE_LIST_GCS"
 
-                    echo "Starting file copy process..."
-
-                    # Iterate over each line in the source file list
-                    while IFS= read -r source_file; do
+                    # Download the source file list
+                    gcloud storage cp "$SOURCE_FILE_LIST_GCS" - | while IFS= read -r source_file; do
                         if [[ -n "$source_file" ]]; then
                             echo "Copying $source_file to $DESTINATION_BUCKET"
-                            # Copy the file to the destination bucket
                             gcloud storage cp "$source_file" "$DESTINATION_BUCKET"
 
                             # Check if the copy was successful
@@ -66,7 +59,7 @@ pipeline {
                                 exit 1
                             fi
                         fi
-                    done < "$SOURCE_FILE_LIST"
+                    done
 
                     echo "File copy process completed successfully!"
                     '''
@@ -103,3 +96,4 @@ pipeline {
         }
     }
 }
+
