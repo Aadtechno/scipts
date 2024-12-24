@@ -1,54 +1,68 @@
-#!/bin/bash
-
-# Define the file containing the list of GCS source file paths
-SOURCE_FILE_LIST="source_files.txt"
-
-# Define the destination GCS bucket path
-DESTINATION_BUCKET="gs:"
-
-# Check if the source file list exists
-if [[ ! -f "$SOURCE_FILE_LIST" ]]; then
-  echo "Error: File $SOURCE_FILE_LIST not found!"
-  exit 1
-fi
-
-# Iterate over each line in the source file list
-while IFS= read -r source_file; do
-  # Ensure the line is not empty
-  if [[ -n "$source_file" ]]; then
-    echo "Copying $source_file to $DESTINATION_BUCKET"
-    # Execute the gcloud storage cp command
-    gcloud storage cp "$source_file" "$DESTINATION_BUCKET"
-    
-    # Check if the command was successful
-    if [[ $? -ne 0 ]]; then
-      echo "Error: Failed to copy $source_file"
-      exit 1
-    fi
-  fi
-done < "$SOURCE_FILE_LIST"
-
-echo "All files have been copied successfully!"
--------------------------------------------------
-
 pipeline {
     agent any
 
     environment {
-        SOURCE_FILE_LIST_GCS = "gs://your-bucket/source_files.txt" // GCS path of the source file
-        DESTINATION_BUCKET = "" // Destination GCS bucket
+        SOURCE_FILE_GCS = "gs://your-bucket/source_file.txt" // GCS path of the source file list
+        DESTINATION_BUCKET = "gs://test/" // Destination GCS bucket
     }
 
     stages {
-        stage('Copy Files') {
+        stage('Download Source File') {
             steps {
                 script {
-                    // Download and directly process the source file list
+                    // Download the source file list from GCS to the workspace
                     sh '''
-                    echo "Downloading and processing $SOURCE_FILE_LIST_GCS"
+                    echo "Downloading source file list from $SOURCE_FILE_GCS"
+                    gcloud storage cp "$SOURCE_FILE_GCS" source_file.txt
 
-                    # Download the source file list
-                    gcloud storage cp "$SOURCE_FILE_LIST_GCS" - | while IFS= read -r source_file; do
+                    # Verify the file was downloaded successfully
+                    if [[ ! -f "source_file.txt" ]]; then
+                        echo "Error: Failed to download $SOURCE_FILE_GCS"
+                        exit 1
+                    fi
+
+                    echo "Source file list downloaded successfully."
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Source Files') {
+            steps {
+                script {
+                    // Verify each file listed in source_file.txt
+                    sh '''
+                    echo "Verifying the files listed in source_file.txt"
+
+                    # Read and verify each file
+                    while IFS= read -r source_file; do
+                        if [[ -n "$source_file" ]]; then
+                            echo "Checking $source_file"
+                            gcloud storage ls -l "$source_file"
+
+                            # Check if the file exists
+                            if [[ $? -ne 0 ]]; then
+                                echo "Error: $source_file does not exist or cannot be accessed"
+                                exit 1
+                            fi
+                        fi
+                    done < source_file.txt
+
+                    echo "All source files verified successfully."
+                    '''
+                }
+            }
+        }
+
+        stage('Copy Files to Destination') {
+            steps {
+                script {
+                    // Copy files to the destination bucket
+                    sh '''
+                    echo "Copying files to $DESTINATION_BUCKET"
+
+                    # Read and copy each file
+                    while IFS= read -r source_file; do
                         if [[ -n "$source_file" ]]; then
                             echo "Copying $source_file to $DESTINATION_BUCKET"
                             gcloud storage cp "$source_file" "$DESTINATION_BUCKET"
@@ -59,24 +73,9 @@ pipeline {
                                 exit 1
                             fi
                         fi
-                    done
+                    done < source_file.txt
 
-                    echo "File copy process completed successfully!"
-                    '''
-                }
-            }
-        }
-
-        stage('Verify Files') {
-            steps {
-                script {
-                    // List files at the destination to verify the operation
-                    sh '''
-                    echo "Verifying files in $DESTINATION_BUCKET:"
-                    gsutil ls -l "$DESTINATION_BUCKET"
-
-                    echo "Summary of total size in $DESTINATION_BUCKET:"
-                    gsutil du -s "$DESTINATION_BUCKET"
+                    echo "All files copied successfully to $DESTINATION_BUCKET."
                     '''
                 }
             }
@@ -96,4 +95,3 @@ pipeline {
         }
     }
 }
-
