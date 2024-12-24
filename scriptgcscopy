@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Define the file containing the list of GCS source file paths
+SOURCE_FILE_LIST="source_files.txt"
+
+# Define the destination GCS bucket path
+DESTINATION_BUCKET="gs://megkxv/test/"
+
+# Check if the source file list exists
+if [[ ! -f "$SOURCE_FILE_LIST" ]]; then
+  echo "Error: File $SOURCE_FILE_LIST not found!"
+  exit 1
+fi
+
+# Iterate over each line in the source file list
+while IFS= read -r source_file; do
+  # Ensure the line is not empty
+  if [[ -n "$source_file" ]]; then
+    echo "Copying $source_file to $DESTINATION_BUCKET"
+    # Execute the gcloud storage cp command
+    gcloud storage cp "$source_file" "$DESTINATION_BUCKET"
+    
+    # Check if the command was successful
+    if [[ $? -ne 0 ]]; then
+      echo "Error: Failed to copy $source_file"
+      exit 1
+    fi
+  fi
+done < "$SOURCE_FILE_LIST"
+
+echo "All files have been copied successfully!"
