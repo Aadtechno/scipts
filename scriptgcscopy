@@ -29,3 +29,77 @@ while IFS= read -r source_file; do
 done < "$SOURCE_FILE_LIST"
 
 echo "All files have been copied successfully!"
+-------------------------------------------------
+
+pipeline {
+    agent any
+
+    environment {
+        SOURCE_FILE_LIST = "source_files.txt" // File containing source GCS file paths
+        DESTINATION_BUCKET = "gs://megkxv/test/" // Destination GCS bucket
+    }
+
+    stages {
+        stage('Copy Files') {
+            steps {
+                script {
+                    // Main copying logic
+                    sh '''
+                    # Check if the source file list exists
+                    if [[ ! -f "$SOURCE_FILE_LIST" ]]; then
+                        echo "Error: File $SOURCE_FILE_LIST not found!"
+                        exit 1
+                    fi
+
+                    echo "Starting file copy process..."
+
+                    # Iterate over each line in the source file list
+                    while IFS= read -r source_file; do
+                        if [[ -n "$source_file" ]]; then
+                            echo "Copying $source_file to $DESTINATION_BUCKET"
+                            # Copy the file to the destination bucket
+                            gcloud storage cp "$source_file" "$DESTINATION_BUCKET"
+
+                            # Check if the copy was successful
+                            if [[ $? -ne 0 ]]; then
+                                echo "Error: Failed to copy $source_file"
+                                exit 1
+                            fi
+                        fi
+                    done < "$SOURCE_FILE_LIST"
+
+                    echo "File copy process completed successfully!"
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Files') {
+            steps {
+                script {
+                    // List files at the destination to verify the operation
+                    sh '''
+                    echo "Verifying files in $DESTINATION_BUCKET:"
+                    gsutil ls -l "$DESTINATION_BUCKET"
+
+                    echo "Summary of total size in $DESTINATION_BUCKET:"
+                    gsutil du -s "$DESTINATION_BUCKET"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up workspace...'
+            cleanWs()
+        }
+        success {
+            echo 'Job completed successfully!'
+        }
+        failure {
+            echo 'Job failed!'
+        }
+    }
+}
