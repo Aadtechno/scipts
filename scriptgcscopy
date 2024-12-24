@@ -10,7 +10,6 @@ pipeline {
         stage('Download and Display Source File') {
             steps {
                 script {
-                    // Download the source file list and display its contents
                     sh '''
                     echo "Downloading source_file.txt from $SOURCE_FILE_GCS"
                     gcloud storage cp "$SOURCE_FILE_GCS" source_file.txt
@@ -31,11 +30,11 @@ pipeline {
         stage('List Each Source File') {
             steps {
                 script {
-                    // Verify the existence of each file
                     sh '''
-                    echo "Verifying files listed in source_file.txt"
+                    echo "Listing and verifying files from source_file.txt"
 
-                    while IFS= read -r source_file; do
+                    # Iterate over each file path and list its details
+                    for source_file in $(cat source_file.txt); do
                         if [[ -n "$source_file" ]]; then
                             echo "Listing $source_file"
                             gsutil ls -l "$source_file"
@@ -46,7 +45,9 @@ pipeline {
                                 exit 1
                             fi
                         fi
-                    done < source_file.txt
+                    done
+
+                    echo "All files verified successfully."
                     '''
                 }
             }
@@ -55,11 +56,11 @@ pipeline {
         stage('Copy Files to Destination') {
             steps {
                 script {
-                    // Copy each file to the destination bucket
                     sh '''
                     echo "Copying files to $DESTINATION_BUCKET"
 
-                    while IFS= read -r source_file; do
+                    # Read and copy each file to the destination
+                    for source_file in $(cat source_file.txt); do
                         if [[ -n "$source_file" ]]; then
                             echo "Copying $source_file to $DESTINATION_BUCKET"
                             gsutil cp "$source_file" "$DESTINATION_BUCKET"
@@ -70,7 +71,7 @@ pipeline {
                                 exit 1
                             fi
                         fi
-                    done < source_file.txt
+                    done
 
                     echo "All files copied successfully."
                     '''
@@ -81,12 +82,13 @@ pipeline {
         stage('Verify Destination') {
             steps {
                 script {
-                    // Verify files in the destination bucket
                     sh '''
-                    echo "Listing files in $DESTINATION_BUCKET:"
+                    echo "Verifying files in $DESTINATION_BUCKET"
+
+                    # List all files in the destination bucket
                     gsutil ls -l "$DESTINATION_BUCKET"
 
-                    echo "Summary of total size in $DESTINATION_BUCKET:"
+                    # Display the total size of the files in the destination bucket
                     gsutil du -s "$DESTINATION_BUCKET"
                     '''
                 }
@@ -100,10 +102,10 @@ pipeline {
             cleanWs()
         }
         success {
-            echo 'Job completed successfully!'
+            echo 'Pipeline executed successfully!'
         }
         failure {
-            echo 'Job failed!'
+            echo 'Pipeline failed.'
         }
     }
 }
