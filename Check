@@ -1,0 +1,20 @@
+stage('Check File Existence') {
+    steps {
+        script {
+            // Print the command to verify the variable substitution
+            echo "Running gsutil stat on: $params.absoluteFileFrom"
+            
+            // Check if the file exists in GCS using gsutil stat
+            def fileStatus = sh(script: "gsutil stat $params.absoluteFileFrom", returnStdout: true, returnStatus: true).trim()
+
+            echo "gsutil stat output: $fileStatus"
+            
+            // Check if the file exists based on the command output
+            if (fileStatus.contains('No URL found')) {
+                error "File does not exist in GCS at $params.absoluteFileFrom"
+            } else {
+                echo "File exists."
+            }
+        }
+    }
+}
