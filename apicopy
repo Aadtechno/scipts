@@ -1,0 +1,106 @@
+pipeline {
+    agent {
+        label 'npe'
+    }
+    options {
+        disableConcurrentBuilds()
+    }
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['npe', 'uat', 'prod'], description: 'Select the environment to trigger API')
+        text(name: 'PIPE', defaultValue: '', description: 'Enter values in the format: abc/def\ntest/super\nmethod/tes23te')
+        string(name: 'BU', defaultValue: '', description: 'Business Unit')
+        string(name: 'PARENT', defaultValue: '', description: 'Parent DAG Folder')
+    }
+    stages {
+        stage('Generate OAuth 2.0 Token') {
+            steps {
+                script {
+                    def oauthUrl = ''
+                    def requestBody = ''
+
+                    if (params.ENVIRONMENT == 'npe') {
+                        withCredentials([usernamePassword(credentialsId: 'NPE-OAUTH', passwordVariable: 'CLIENT_SECRET', usernameVariable: 'CLIENT_ID')]) {
+                            oauthUrl = "https://npe-auth-url.com/as/token.oauth2"
+                            requestBody = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+                        }
+                    } else {
+                        withCredentials([usernamePassword(credentialsId: 'UAT-PROD-OAUTH', passwordVariable: 'CLIENT_SECRET', usernameVariable: 'CLIENT_ID')]) {
+                            oauthUrl = "https://uat-prod-auth-url.com/as/token.oauth2"
+                            requestBody = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+                        }
+                    }
+
+                    def accessToken = sh(script: "curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d '${requestBody}' ${oauthUrl} | jq -r '.access_token'", returnStdout: true).trim()
+
+                    if (accessToken) {
+                        currentBuild.description = "OAuth Token Request Successful"
+                        env.ACCESS_TOKEN = accessToken
+                    } else {
+                        error("Failed to obtain OAuth token")
+                    }
+                }
+            }
+        }
+
+        stage('Trigger API Calls in Bulk') {
+            steps {
+                script {
+                    def apiUrl = ''
+
+                    switch (params.ENVIRONMENT) {
+                        case 'npe':
+                            apiUrl = "https://npe-api-url.com/unpublish"
+                            break
+                        case 'uat':
+                            apiUrl = "https://uat-api-url.com/unpublish"
+                            break
+                        case 'prod':
+                            apiUrl = "https://prod-api-url.com/unpublish"
+                            break
+                    }
+
+                    // Splitting the PIPE parameter into entries
+                    def pipeEntries = params.PIPE.split("\n")
+
+                    pipeEntries.each { entry ->
+                        // Splitting each entry into customer and name
+                        def parts = entry.trim().split("/")
+
+                        if (parts.length == 2) {
+                            def customer = parts[0].trim()
+                            def name = parts[1].trim()
+
+                            // Using triple quotes for JSON payload
+                            def jsonPayload = """
+                            {
+                                "customer": "${customer}",
+                                "name": "${name}",
+                                "bu": "${params.BU}",
+                                "parentDAGFolder": "${params.PARENT}"
+                            }
+                            """
+
+                            // Making API call with the constructed JSON payload
+                            def response = sh(script: "curl -X POST '${apiUrl}' -H 'Content-Type: application/json' -H 'Authorization: Bearer ${env.ACCESS_TOKEN}' -d '${jsonPayload}' -k", returnStdout: true).trim()
+
+                            // Check response for specific keywords and skip if present
+                            if (response.contains("is already in") || response.contains("error") || response.contains("does not exist in")) {
+                                echo "Skipping entry for customer ${customer} and name ${name} due to response: ${response}"
+                                return // Skip to the next PIPE entry
+                            }
+
+                            // Logging the response for each customer and name
+                            echo "Response for customer ${customer} and name ${name}: ${response}"
+                        } else {
+                            // Logging invalid entries
+                            echo "Skipping invalid entry: ${entry}"
+                        }
+
+                        // Adding a delay between API calls
+                        sleep(time: 2, unit: 'SECONDS')
+                    }
+                }
+            }
+        }
+    }
+}
