@@ -2,52 +2,45 @@ pipeline {
     agent none
 
     environment {
-        // Define full GCS paths for each environment
-        GCS_PATHS = [
-            NPE: "gs://your-npe-bucket-name/path/to/your/file.txt",
-            UAT: "gs://your-uat-bucket-name/path/to/your/file.txt",
-            PROD: "gs://your-prod-bucket-name/path/to/your/file.txt"
+        // Define environments and their corresponding full GCS paths
+        ENVIRONMENTS = [
+            'npe': 'gs://your-npe-bucket-name/path/to/your/file.txt',
+            'uat': 'gs://your-uat-bucket-name/path/to/your/file.txt',
+            'prod': 'gs://your-prod-bucket-name/path/to/your/file.txt'
+        ]
+        AGENT_LABELS = [
+            'npe': 'npe-agent-label',
+            'uat': 'uat-agent-label',
+            'prod': 'prod-agent-label'
+        ]
+        DOWNSTREAM_JOBS = [
+            'npe': 'downstream-job-npe',
+            'uat': 'downstream-job-uat',
+            'prod': 'downstream-job-prod'
         ]
     }
 
     stages {
         stage('Check Files') {
             parallel {
-                stage('Check File in NPE') {
-                    agent { label 'npe-agent-label' }
-                    steps {
-                        checkFile('NPE')
+                ENVIRONMENTS.each { env, gcsPath ->
+                    stage("Check File in ${env.toUpperCase()}") {
+                        agent { label AGENT_LABELS[env] }
+                        steps {
+                            script {
+                                echo "Checking file in ${env.toUpperCase()} bucket"
+                                def fileExists = sh(script: "gsutil -q stat ${gcsPath}", returnStatus: true) == 0
+
+                                if (fileExists) {
+                                    echo "File exists in ${env.toUpperCase()} bucket"
+                                    build job: DOWNSTREAM_JOBS[env], wait: false
+                                } else {
+                                    error "File does not exist in ${env.toUpperCase()} bucket"
+                                }
+                            }
+                        }
                     }
                 }
-
-                stage('Check File in UAT') {
-                    agent { label 'uat-agent-label' }
-                    steps {
-                        checkFile('UAT')
-                    }
-                }
-
-                stage('Check File in PROD') {
-                    agent { label 'prod-agent-label' }
-                    steps {
-                        checkFile('PROD')
-                    }
-                }
-            }
-        }
-    }
-
-    // Define a reusable function to check file existence
-    script {
-        def checkFile(env) {
-            echo "Checking file in ${env} bucket"
-            def fileExists = sh(script: "gsutil -q stat ${GCS_PATHS[env]}", returnStatus: true) == 0
-
-            if (fileExists) {
-                echo "File exists in ${env} bucket"
-                build job: "downstream-job-${env.toLowerCase()}", wait: false
-            } else {
-                error "File does not exist in ${env} bucket"
             }
         }
     }
