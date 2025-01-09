@@ -21,24 +21,55 @@ pipeline {
     }
 
     stages {
-        stage('Check Files') {
-            parallel {
-                ENVIRONMENTS.each { env, gcsPath ->
-                    stage("Check File in ${env.toUpperCase()}") {
-                        agent { label AGENT_LABELS[env] }
-                        steps {
-                            script {
-                                echo "Checking file in ${env.toUpperCase()} bucket"
-                                def fileExists = sh(script: "gsutil -q stat ${gcsPath}", returnStatus: true) == 0
+        stage('Check File in NPE') {
+            agent { label AGENT_LABELS['npe'] }
+            steps {
+                script {
+                    def gcsPath = ENVIRONMENTS['npe']
+                    echo "Checking file in NPE bucket"
+                    def fileExists = sh(script: "gsutil -q stat ${gcsPath}", returnStatus: true) == 0
 
-                                if (fileExists) {
-                                    echo "File exists in ${env.toUpperCase()} bucket"
-                                    build job: DOWNSTREAM_JOBS[env], wait: false
-                                } else {
-                                    error "File does not exist in ${env.toUpperCase()} bucket"
-                                }
-                            }
-                        }
+                    if (fileExists) {
+                        echo "File exists in NPE bucket"
+                        build job: DOWNSTREAM_JOBS['npe'], wait: false
+                    } else {
+                        error "File does not exist in NPE bucket"
+                    }
+                }
+            }
+        }
+
+        stage('Check File in UAT') {
+            agent { label AGENT_LABELS['uat'] }
+            steps {
+                script {
+                    def gcsPath = ENVIRONMENTS['uat']
+                    echo "Checking file in UAT bucket"
+                    def fileExists = sh(script: "gsutil -q stat ${gcsPath}", returnStatus: true) == 0
+
+                    if (fileExists) {
+                        echo "File exists in UAT bucket"
+                        build job: DOWNSTREAM_JOBS['uat'], wait: false
+                    } else {
+                        error "File does not exist in UAT bucket"
+                    }
+                }
+            }
+        }
+
+        stage('Check File in PROD') {
+            agent { label AGENT_LABELS['prod'] }
+            steps {
+                script {
+                    def gcsPath = ENVIRONMENTS['prod']
+                    echo "Checking file in PROD bucket"
+                    def fileExists = sh(script: "gsutil -q stat ${gcsPath}", returnStatus: true) == 0
+
+                    if (fileExists) {
+                        echo "File exists in PROD bucket"
+                        build job: DOWNSTREAM_JOBS['prod'], wait: false
+                    } else {
+                        error "File does not exist in PROD bucket"
                     }
                 }
             }
