@@ -1,0 +1,54 @@
+pipeline {
+    agent none
+
+    environment {
+        // Define full GCS paths for each environment
+        GCS_PATHS = [
+            NPE: "gs://your-npe-bucket-name/path/to/your/file.txt",
+            UAT: "gs://your-uat-bucket-name/path/to/your/file.txt",
+            PROD: "gs://your-prod-bucket-name/path/to/your/file.txt"
+        ]
+    }
+
+    stages {
+        stage('Check Files') {
+            parallel {
+                stage('Check File in NPE') {
+                    agent { label 'npe-agent-label' }
+                    steps {
+                        checkFile('NPE')
+                    }
+                }
+
+                stage('Check File in UAT') {
+                    agent { label 'uat-agent-label' }
+                    steps {
+                        checkFile('UAT')
+                    }
+                }
+
+                stage('Check File in PROD') {
+                    agent { label 'prod-agent-label' }
+                    steps {
+                        checkFile('PROD')
+                    }
+                }
+            }
+        }
+    }
+
+    // Define a reusable function to check file existence
+    script {
+        def checkFile(env) {
+            echo "Checking file in ${env} bucket"
+            def fileExists = sh(script: "gsutil -q stat ${GCS_PATHS[env]}", returnStatus: true) == 0
+
+            if (fileExists) {
+                echo "File exists in ${env} bucket"
+                build job: "downstream-job-${env.toLowerCase()}", wait: false
+            } else {
+                error "File does not exist in ${env} bucket"
+            }
+        }
+    }
+}
