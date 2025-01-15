@@ -1,0 +1,82 @@
+pipeline {
+    agent { label '' }
+
+    environment {
+        GCS_BUCKET = "gs://app/source/"
+        PREFIX = "ABCD"
+        PUBLIC_KEY = ""
+    }
+
+    stages {
+        stage('Check File in GCS Bucket') {
+            steps {
+                script {
+                    echo "Checking for file in GCS bucket folder"
+                    def fileExists = sh(script: "gsutil -q stat ${GCS_BUCKET}*", returnStatus: true) == 0
+
+                    if (fileExists) {
+                        echo "File found in GCS bucket. Proceeding with the pipeline."
+                    } else {
+                        error "No file found in GCS bucket. Aborting pipeline."
+                    }
+                }
+            }
+        }
+
+        stage('Download and Prefix to Filename') {
+            steps {
+                script {
+                    echo "Downloading file from GCS bucket"
+                    sh "gsutil cp ${GCS_BUCKET}* ."
+
+                    echo "Extracting file name from GCS path"
+                    env.FILE_NAME = sh(script: "ls | head -n 1", returnStdout: true).trim()
+
+                    env.PREFIXED_FILE_NAME = "${PREFIX}${env.FILE_NAME}"
+
+                    echo "Found file: ${env.FILE_NAME}"
+                    sh "mv ${env.FILE_NAME} ${env.PREFIXED_FILE_NAME}"
+                    echo "Prefixed file: ${env.PREFIXED_FILE_NAME}"
+                }
+            }
+        }
+
+        stage('Encrypt File') {
+            steps {
+                script {
+                    echo "Listing existing GPG keys"
+                    sh "gpg --list-keys"
+
+                    echo "Importing public key"
+                    sh "gsutil cp ${PUBLIC_KEY} ."
+                    sh "gpg --import KEY.asc"
+
+                    echo "Encrypting file"
+                    sh "gpg --output ${env.PREFIXED_FILE_NAME}.pgp --encrypt --openpgp --trust-model always --recipient ${env.PREFIXED_FILE_NAME}"
+                }
+            }
+        }
+
+        stage('Upload Encrypted File to GCS') {
+            steps {
+                script {
+                    echo "Uploading encrypted file to GCS bucket"
+                    sh "gsutil cp ${env.PREFIXED_FILE_NAME}.pgp gs://ca_dirty_prod/incoming/inbox/"
+                    sh "gsutil ls -l gs://meg/kri/${env.PREFIXED_FILE_NAME}.pgp"
+                }
+            }
+        }
+
+        stage('Delete Original and Local Files') {
+            steps {
+                script {
+                    echo "Deleting original file from GCS"
+                    sh "gsutil rm ${GCS_BUCKET}"
+
+                    echo "Cleaning up local files"
+                    sh "rm -f ${env.PREFIXED_FILE_NAME} ${env.PREFIXED_FILE_NAME}.gpg"
+                }
+            }
+        }
+    }
+}
