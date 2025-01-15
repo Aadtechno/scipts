@@ -1,0 +1,80 @@
+pipeline {
+    agent any
+    
+    // Define environment variables
+    environment {
+        // Update these values according to your GCS configuration
+        GCS_BUCKET = 'your-bucket-name'
+        GCS_FOLDER = 'your-folder-path'
+        FILE_PATTERN = '*.txt' // Update with your file pattern/extension
+    }
+    
+    stages {
+        stage('Setup Google Cloud SDK') {
+            steps {
+                // Assuming you have already configured Google Cloud credentials in Jenkins
+                script {
+                    // Use the configured Google Cloud credentials
+                    withCredentials([file(credentialsId: 'google-cloud-credentials', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                        sh '''
+                            gcloud auth activate-service-account --key-file=${GOOGLE_APPLICATION_CREDENTIALS}
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Check File Existence') {
+            steps {
+                script {
+                    def fileExists = false
+                    
+                    // List files in the GCS bucket folder and check if any match the pattern
+                    def result = sh(
+                        script: """
+                            files=\$(gsutil ls gs://${GCS_BUCKET}/${GCS_FOLDER}/${FILE_PATTERN})
+                            if [ \$? -eq 0 ]; then
+                                echo "File(s) found!"
+                                echo "\$files"
+                                exit 0
+                            else
+                                echo "No matching files found"
+                                exit 1
+                            fi
+                        """,
+                        returnStatus: true
+                    )
+                    
+                    if (result == 0) {
+                        echo "File exists in GCS bucket folder, proceeding with pipeline"
+                        fileExists = true
+                    } else {
+                        error "Required file not found in GCS bucket folder. Aborting pipeline."
+                    }
+                    
+                    // Store the result for use in later stages
+                    env.FILE_EXISTS = fileExists.toString()
+                }
+            }
+        }
+        
+        stage('Next Stage') {
+            when {
+                expression { env.FILE_EXISTS == 'true' }
+            }
+            steps {
+                echo "Proceeding with next stage..."
+                // Add your next stage steps here
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "Pipeline completed successfully"
+        }
+        failure {
+            echo "Pipeline failed"
+        }
+    }
+}
