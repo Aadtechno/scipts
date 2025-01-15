@@ -78,3 +78,30 @@ pipeline {
         }
     }
 }
+--------
+stage('Check if File Exists') {
+            steps {
+                script {
+                    def fileExists = false
+                    try {
+                        // List files in the folder using gsutil
+                        def result = sh(script: "gsutil ls gs://${BUCKET_NAME}/${FOLDER_PATH}*", returnStdout: true).trim()
+                        
+                        // If result is not the same as folder path, files are present
+                        if (result != "gs://${BUCKET_NAME}/${FOLDER_PATH}/") {
+                            fileExists = true
+                        }
+                    } catch (Exception e) {
+                        echo "Error occurred: ${e}"
+                    }
+
+                    // Proceed or abort based on the file presence
+                    if (!fileExists) {
+                        currentBuild.result = 'ABORTED'
+                        error "No file found in the specified folder. Aborting the pipeline."
+                    } else {
+                        echo "File(s) found in the folder, proceeding to next stage."
+                    }
+                }
+            }
+        }
