@@ -1,0 +1,66 @@
+String node_label
+if (params.ENV == "alpha") {
+    node_label = "dev"
+} else if(params.ENV == "beta") {
+    node_label = "uat"
+} else if (params.ENV == "prod") {
+    node_label = "prodnode"
+}
+
+pipeline {
+    agent none
+    parameters {
+        choice(choices: ['alpha','beta','prod'], description: 'Select the environment', name: 'ENV')
+        string(name: 'fileName', defaultValue:'flow.yml', description: 'YAML file name', trim: true)
+        string(name: 'bucketDirectory', defaultValue:'gs://example/bucket/directory/', description: 'Where the file will be uploaded', trim: true)
+        text(name: 'content', defaultValue: '', description: 'FILE content', trim:true)
+    }
+    environment {
+        ALLOWED_USERS = "arjun,anjusha,sanjana,aad,pin" // Externalized list of allowed users
+        ALLOWED_FOLDERS = "gs://mirrortest/folder1/,gs://mirrortest/folder2/" // Externalized allowed folders
+        NOTIFICATION_RECIPIENTS = "recipient1@example.com,recipient2@example.com" // Email recipients for notifications
+    }
+    stages {
+        stage('Upload File') {
+            agent {label "$node_label"}
+            steps {
+                script {
+                    // Get the user who triggered the build
+                    def triggeredByUser = currentBuild.rawBuild.getCause(hudson.model.Cause$UserIdCause)?.getUserName() ?: "SYSTEM"
+
+                    // Split allowed users and folders into lists
+                    def allowedUsersList = env.ALLOWED_USERS.split(',')
+                    def allowedFoldersList = env.ALLOWED_FOLDERS.split(',')
+
+                    // Check if environment is prod and bucket directory starts with gs://mirrortest/
+                    if (params.ENV == 'prod' && params.bucketDirectory.startsWith('gs://mirrortest/')) {
+                        // Validate user and folder
+                        if (!allowedFoldersList.contains(params.bucketDirectory) || !allowedUsersList.contains(triggeredByUser)) {
+                            error "Access denied! User ${triggeredByUser} is restricted from uploading to ${params.bucketDirectory}."
+                        }
+                    }
+
+                    // Write and upload the file
+                    writeFile file: "${params.fileName}", text: "${params.content}"
+                    sh "cat ${params.fileName}"
+                    sh "gsutil cp ${params.fileName} ${params.bucketDirectory}"
+
+                    // Send email notification if conditions are met
+                    if (params.ENV == 'prod' && allowedFoldersList.contains(params.bucketDirectory)) {
+                        emailext (
+                            subject: "File Upload Notification: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}",
+                            body: """
+                            <p>A file has been uploaded to ${params.bucketDirectory}</p>
+                            <p>User: ${triggeredByUser}</p>
+                            <p>Job: ${env.JOB_NAME}</p>
+                            <p>Build URL: <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a></p>
+                            """,
+                            to: env.NOTIFICATION_RECIPIENTS,
+                            mimeType: 'text/html'
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
