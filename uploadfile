@@ -1,0 +1,55 @@
+String node_label
+if (params.ENV == "alpha") {
+    node_label = "dev"
+} else if(params.ENV == "beta") {
+    node_label = "uat"
+} else if (params.ENV == "prod") {
+    node_label = "prodnode"
+}
+
+pipeline {
+    agent none
+    parameters {
+        choice(choices: ['alpha','beta','prod'], description: 'Select the environment', name: 'ENV')
+        string(name: 'fileName', defaultValue:'flow.yml', description: 'YAML file name', trim: true)
+        string(name: 'bucketDirectory', defaultValue:'gs://example/bucket/directory/', description: 'Where the file will be uploaded', trim: true)
+        text(name: 'content', defaultValue: '', description: 'FILE content', trim:true)
+    }
+    stages {
+        stage('Upload File and Check Permissions') {
+            agent {label "$node_label"}
+            steps {
+                script {
+                    def allowedUsers = ['arjun', 'anjusha', 'sanjana', 'aad', 'pin']
+                    def allowedFolders = ['gs://mirrortest/folder1/', 'gs://mirrortest/folder2/']
+                    
+                    if (params.ENV == 'prod' && params.bucketDirectory.startsWith('gs://mirrortest/')) {
+                        if (!allowedFolders.contains(params.bucketDirectory) || !allowedUsers.contains(env.USER)) {
+                            error "User ${env.USER} is restricted from uploading to ${params.bucketDirectory}"
+                        }
+                    }
+                    
+                    // Write and upload the file
+                    writeFile file: "${params.fileName}", text: "${params.content}"
+                    sh "cat ${params.fileName}"
+                    sh "gsutil cp ${params.fileName} ${params.bucketDirectory}"
+                    
+                    // Send email notification if conditions are met
+                    if (params.ENV == 'prod' && allowedFolders.contains(params.bucketDirectory)) {
+                        emailext (
+                            subject: "File Upload Notification: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}",
+                            body: """
+                            <p>A file has been uploaded to ${params.bucketDirectory}</p>
+                            <p>User: ${env.USER}</p>
+                            <p>Job: ${env.JOB_NAME}</p>
+                            <p>Build URL: ${env.BUILD_URL}</p>
+                            """,
+                            to: 'recipient1@example.com, recipient2@example.com',
+                            mimeType: 'text/html'
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
