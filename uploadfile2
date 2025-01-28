@@ -26,7 +26,7 @@ pipeline {
             steps {
                 script {
                     // Get the user who triggered the build
-                    def triggeredByUser = currentBuild.rawBuild.getCause(hudson.model.Cause$UserIdCause)?.getUserName() ?: "SYSTEM"
+                    def triggeredByUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId
 
                     // Split allowed users and folders into lists
                     def allowedUsersList = env.ALLOWED_USERS.split(',')
