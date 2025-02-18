@@ -5,4 +5,4 @@ nohup sh -c 'gsutil ls -l -r gs://your-bucket-name/ | awk '"'"'$1 ~ /^[0-9]/ && 
 gsutil ls -l -r gs://your-bucket-name/ | awk '$1 ~ /^[0-9]/ && $2 < "2024-12-01" {count++} END {print "Total files before December 2024:", count}'
 
 
-gcloud storage objects list --bucket your-bucket-name --filter="timeCreated>=2023-01-01T00:00:00Z AND timeCreated<2024-01-01T00:00:00Z"
+gcloud storage objects list --bucket your-bucket-name --filter="timeCreated>=2022-01-01T00:00:00Z AND timeCreated<2023-01-01T00:00:00Z" --format="value(name)"
