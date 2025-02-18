@@ -15,3 +15,6 @@ gsutil ls -l gs://your-bucket-name/** --versions | awk '$2 >= "2022-01-01T00:00:
 
 ___
 gsutil ls -l gs://your-bucket-name/** --versions | awk '$2 >= "2022-01-01T00:00:00Z" && $2 < "2023-01-01T00:00:00Z" {print $3}'
+
+
+gsutil ls -l gs://your-bucket-name/** --versions | awk '$2 >= "2022-01-01T00:00:00Z" && $2 < "2023-01-01T00:00:00Z" {print $1}' | xargs -I {} gsutil -m rm {}
