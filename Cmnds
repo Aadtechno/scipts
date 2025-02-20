@@ -20,3 +20,6 @@ gsutil ls -l gs://your-bucket-name/** --versions | awk '$2 >= "2022-01-01T00:00:
 gsutil ls -l gs://your-bucket-name/** --versions | awk '$2 >= "2022-01-01T00:00:00Z" && $2 < "2023-01-01T00:00:00Z" {print $1}' | xargs -I {} gsutil -m rm {}
 
 gcloud storage objects list --bucket gs://your-bucket-name --filter "timeCreated >= '2024-01-01T00:00:00Z' AND timeCreated < '2024-02-01T00:00:00Z'" --format="value(name,timeCreated)" | grep '\.avro$'
+
+gsutil ls -l gs://your-bucket-name/** | awk '$2 >= "2024-01-01T00:00:00Z" && $2 < "2024-02-01T00:00:00Z" && $3 ~ /\.avro$/ {print $3, $2}'
+
