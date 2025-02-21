@@ -25,4 +25,46 @@ gsutil ls -l gs://your-bucket-name/** | awk '$2 >= "2024-01-01T00:00:00Z" && $2 
 
 gcloud storage objects list --bucket gs://your-bucket-name --format="value(name,timeCreated)" | grep '\.avro$' | awk '$2 >= "2024-01-01T00:00:00Z" && $2 < "2024-02-01T00:00:00Z" {print $1, $2}'
 
+pipeline {
+    agent any  // You can specify a node label if needed
+
+    parameters {
+        string(name: 'GCS_BUCKET', defaultValue: 'your-bucket-name', description: 'Google Cloud Storage Bucket Name')
+        string(name: 'GCS_FILE_PATH', defaultValue: 'folder/file_to_delete.txt', description: 'Path to the file that contains the GCS paths to delete')
+    }
+
+    stages {
+        stage('Download File from GCS') {
+            steps {
+                script {
+                    echo "Downloading file from GCS: gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH}"
+                    // Download the file from GCS to the local workspace
+                    sh "gsutil cp gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH} file_to_delete.txt"
+                }
+            }
+        }
+
+        stage('Delete Files from GCS') {
+            steps {
+                script {
+                    echo "Deleting files from GCS based on file content"
+                    // Delete files in parallel using xargs
+                    sh '''
+                    cat file_to_delete.txt | xargs -I {} -P 10 gcloud storage rm {}
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Successfully deleted files."
+        }
+        failure {
+            echo "File deletion failed."
+        }
+    }
+}
+
 
