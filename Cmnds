@@ -66,5 +66,54 @@ pipeline {
         }
     }
 }
+-----
+pipeline {
+    agent any  // You can specify a node label if needed
+
+    parameters {
+        string(name: 'GCS_BUCKET', defaultValue: 'your-bucket-name', description: 'Google Cloud Storage Bucket Name')
+        string(name: 'GCS_FILE_PATH', defaultValue: 'folder/file_to_delete.txt', description: 'Path to the file that contains the GCS paths to delete')
+    }
+
+    environment {
+        GOOGLE_APPLICATION_CREDENTIALS = '/path/to/your/service-account-key.json'  // If you need credentials for GCS
+    }
+
+    stages {
+        stage('Download File from GCS') {
+            steps {
+                script {
+                    echo "Downloading file from GCS: gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH}"
+                    // Download the file from GCS to Jenkins workspace
+                    sh "gsutil cp gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH} file_to_delete.txt"
+                }
+            }
+        }
+
+        stage('Split File into Chunks') {
+            steps {
+                script {
+                    echo "Splitting the file into smaller chunks"
+                    // Split the file into smaller chunks of 1 million lines
+                    sh 'split -l 1000 file_to_delete.txt chunk_'
+                }
+            }
+        }
+
+        stage('Delete Files in Parallel') {
+            steps {
+                script {
+                    echo "Deleting files from GCS in parallel based on file chunks"
+                    // Use parallel to process each chunk and delete files in parallel
+                    sh '''
+                    for chunk in chunk_*; do
+                        cat $chunk | parallel -j 50 gcloud storage rm {}
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
 
 
