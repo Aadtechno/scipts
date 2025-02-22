@@ -115,5 +115,62 @@ pipeline {
         }
     }
 }
+-----
+pipeline {
+    agent any  // You can specify a node label if needed
+
+    parameters {
+        string(name: 'GCS_BUCKET', defaultValue: 'your-bucket-name', description: 'Google Cloud Storage Bucket Name')
+        string(name: 'GCS_FILE_PATH', defaultValue: 'folder/file_to_delete.txt', description: 'Path to the file that contains the GCS paths to delete')
+    }
+
+    environment {
+        GOOGLE_APPLICATION_CREDENTIALS = '/path/to/your/service-account-key.json'  // If you need credentials for GCS
+    }
+
+    stages {
+        stage('Download File from GCS') {
+            steps {
+                script {
+                    echo "Downloading file from GCS: gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH}"
+                    // Download the file from GCS to Jenkins workspace using the GCS_FILE_PATH parameter
+                    sh "gsutil cp gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH} ${params.GCS_FILE_PATH}"
+                }
+            }
+        }
+
+        stage('Split File into Chunks') {
+            steps {
+                script {
+                    echo "Splitting the file into smaller chunks"
+                    // Split the file into smaller chunks of 1 million lines
+                    sh """
+                    split -l 1000000 ${params.GCS_FILE_PATH} ${params.GCS_FILE_PATH}_chunk_
+                    """
+                }
+            }
+        }
+
+        stage('Delete Files in Parallel') {
+            steps {
+                script {
+                    echo "Deleting files from GCS in parallel based on file chunks"
+
+                    // Loop through each chunk and delete files using xargs
+                    sh '''
+                    for chunk in ${params.GCS_FILE_PATH}_chunk_*; do
+                        if [ -f "$chunk" ]; then
+                            echo "Deleting chunk: $chunk"
+                            cat $chunk | xargs -n 1000 -P 50 gcloud storage rm "{}"
+                        else
+                            echo "Chunk file not found, skipping: $chunk"
+                        fi
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
 
 
