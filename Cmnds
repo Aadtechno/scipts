@@ -326,6 +326,51 @@ pipeline {
         }
     }
 }
+----
+pipeline {
+    agent { label "" }
+
+    stages {
+        stage('Download, Split File into Chunks and Delete Files') {
+            steps {
+                script {
+                    // Step 1: Download the file from GCS
+                    sh '''
+                    gsutil /uat-avro-files-delete/uat_avro_file_03.txt uat_avro_file_03.txt || echo "File not found, skipping download"
+                    '''
+
+                    // Step 2: Check if file exists before proceeding
+                    sh '''
+                    if [ ! -f uat_avro_file_03.txt ]; then
+                        echo "File does not exist, skipping further steps."
+                        exit 0
+                    fi
+                    '''
+
+                    // Step 3: Split the file into smaller chunks
+                    sh '''
+                    echo "Splitting the file into smaller chunks"
+                    split -l 1000 uat_avro_file_03.txt uat_avro_file_03_
+                    ls -1
+                    '''
+
+                    // Step 4: Delete files from GCS in parallel, skipping errors
+                    sh '''
+                    echo "Deleting files from GCS based on chunks"
+                    for uat_avro_file in uat_avro_file_03_*; do
+                        if [ -s "$uat_avro_file" ]; then
+                            cat "$uat_avro_file" | xargs -n 1000 -P 100 gcloud storage rm || echo "Skipping error in deletion"
+                        else
+                            echo "Skipping empty file: $uat_avro_file"
+                        fi
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
+
 
 
 
