@@ -172,5 +172,124 @@ pipeline {
         }
     }
 }
+-----
+pipeline {
+    agent any  // You can specify a node label if needed
+
+    parameters {
+        string(name: 'GCS_BUCKET', defaultValue: 'your-bucket-name', description: 'Google Cloud Storage Bucket Name')
+        string(name: 'GCS_FILE_PATH', defaultValue: 'folder/file_to_delete.txt', description: 'Path to the file that contains the GCS paths to delete')
+    }
+
+    environment {
+        GOOGLE_APPLICATION_CREDENTIALS = '/path/to/your/service-account-key.json'  // If you need credentials for GCS
+    }
+
+    stages {
+        stage('Download File from GCS') {
+            steps {
+                script {
+                    echo "Downloading file from GCS: gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH}"
+                    // Use the parameter value GCS_FILE_PATH for the local file name
+                    sh "gsutil cp gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH} ${params.GCS_FILE_PATH}"
+                }
+            }
+        }
+
+        stage('Split File into Chunks') {
+            steps {
+                script {
+                    echo "Splitting the file into smaller chunks"
+                    // Extract the base name and use it for chunk files
+                    def baseName = params.GCS_FILE_PATH.split('/').last().replace('.txt', '')
+                    echo "Base name for chunking: ${baseName}"
+
+                    // Split the file into smaller chunks of 1 million lines
+                    // Output chunk files will be named based on the base name extracted from the path
+                    sh """
+                    split -l 1000000 ${params.GCS_FILE_PATH} ${baseName}_chunk_
+                    """
+                }
+            }
+        }
+
+        stage('Delete Files in Parallel') {
+            steps {
+                script {
+                    echo "Deleting files from GCS in parallel based on file chunks"
+                    // Use parallel to process each chunk and delete files in parallel
+                    sh '''
+                    for chunk in ${baseName}_chunk_*; do
+                        cat $chunk | parallel -j 50 gcloud storage rm {}
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
+-----
+pipeline {
+    agent any  // You can specify a node label if needed
+
+    parameters {
+        string(name: 'GCS_BUCKET', defaultValue: 'your-bucket-name', description: 'Google Cloud Storage Bucket Name')
+        string(name: 'GCS_FILE_PATH', defaultValue: 'folder/file_to_delete.txt', description: 'Path to the file that contains the GCS paths to delete')
+    }
+
+    environment {
+        GOOGLE_APPLICATION_CREDENTIALS = '/path/to/your/service-account-key.json'  // If you need credentials for GCS
+    }
+
+    stages {
+        stage('Download File from GCS') {
+            steps {
+                script {
+                    echo "Downloading file from GCS: gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH}"
+                    // Use the parameter value GCS_FILE_PATH for the local file name
+                    sh "gsutil cp gs://${params.GCS_BUCKET}/${params.GCS_FILE_PATH} ${params.GCS_FILE_PATH}"
+                }
+            }
+        }
+
+        stage('Split File into Chunks') {
+            steps {
+                script {
+                    echo "Splitting the file into smaller chunks"
+
+                    // Extract the base name and use it for chunk files
+                    def baseName = params.GCS_FILE_PATH.split('/').last().replace('.txt', '')
+                    echo "Base name for chunking: ${baseName}"
+
+                    // Split the file into smaller chunks of 1 million lines
+                    // Output chunk files will be named based on the base name extracted from the path
+                    sh """
+                    split -l 1000000 ${params.GCS_FILE_PATH} ${baseName}_chunk_
+                    """
+                }
+            }
+        }
+
+        stage('Delete Files in Parallel') {
+            steps {
+                script {
+                    echo "Deleting files from GCS in parallel based on file chunks"
+
+                    // Get a list of chunk files and process them in parallel using xargs
+                    sh '''
+                    for chunk in ${baseName}_chunk_*; do
+                        if [ -f "$chunk" ]; then
+                            echo "Deleting chunk: $chunk"
+                            cat "$chunk" | xargs -n 1000 -P 50 gcloud storage rm "{}" || echo "Error deleting chunk: $chunk"
+                        else
+                            echo "Chunk file not found, skipping: $chunk"
+                        fi
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
 
 
