@@ -1,0 +1,67 @@
+pipeline {
+    agent {
+        node {
+            label 'your-gcs-access-node-label' // Replace with your actual node label
+        }
+    }
+    
+    parameters {
+        string(name: 'GCS_BUCKET_PATH', defaultValue: 'gs://your-bucket-name', description: 'GCS bucket path')
+    }
+    
+    stages {
+        stage('List Old Avro Files') {
+            steps {
+                script {
+                    // Get current date in seconds since epoch
+                    sh '''
+                        #!/bin/bash
+                        set -e
+                        
+                        # Define bucket path from parameter
+                        BUCKET_PATH="${GCS_BUCKET_PATH}"
+                        
+                        # Calculate the cutoff date (90 days ago) in seconds
+                        CURRENT_DATE=$(date +%s)
+                        NINETY_DAYS_IN_SECONDS=$((90 * 24 * 60 * 60))
+                        CUTOFF_DATE=$((CURRENT_DATE - NINETY_DAYS_IN_SECONDS))
+                        
+                        echo "Looking for .avro files older than 90 days in ${BUCKET_PATH}"
+                        echo "Cutoff date: $(date -d @${CUTOFF_DATE} '+%Y-%m-%d')"
+                        
+                        # Use gsutil to list objects and process with awk/grep
+                        gsutil ls -l "${BUCKET_PATH}/**/*.avro" | while read -r line; do
+                            # Extract the timestamp and file path
+                            file_date=$(echo "$line" | awk '{print $2, $3}')
+                            file_timestamp=$(date -d "${file_date}" +%s)
+                            file_path=$(echo "$line" | awk '{print $NF}')
+                            
+                            # Compare with cutoff date
+                            if [ "${file_timestamp}" -lt "${CUTOFF_DATE}" ]; then
+                                echo "${file_path} (Created: $(date -d @${file_timestamp} '+%Y-%m-%d'))"
+                            fi
+                        done > old_avro_files.txt
+                        
+                        # Check if any files were found
+                        if [ -s old_avro_files.txt ]; then
+                            echo "Found these old .avro files:"
+                            cat old_avro_files.txt
+                            echo "Total count: $(wc -l < old_avro_files.txt) files"
+                        else
+                            echo "No .avro files older than 90 days found."
+                        fi
+                    '''
+                    
+                    // Archive the results
+                    archiveArtifacts artifacts: 'old_avro_files.txt', allowEmptyArchive: true
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
