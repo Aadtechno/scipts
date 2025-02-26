@@ -1,0 +1,24 @@
+pipeline {
+    agent any
+    environment {
+        GCS_BUCKET = "gs://df-dna-plt-commercial-credit-landing-zone-ca-uat/commercial_credit/"
+    }
+    stages {
+        stage('List .avro files older than 90 days') {
+            steps {
+                script {
+                    sh '''
+                    echo "Fetching .avro files older than 90 days from $GCS_BUCKET..."
+
+                    gcloud storage ls --recursive $GCS_BUCKET --format="value(updated,name)" | \
+                    while read -r date path; do
+                        if [[ "$path" == *.avro ]] && [[ $(date -d "$date" +%s) -lt $(date -d "90 days ago" +%s) ]]; then
+                            echo "OLD FILE: $path (Last Modified: $date)"
+                        fi
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
