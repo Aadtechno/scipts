@@ -22,3 +22,25 @@ pipeline {
         }
     }
 }
+----
+pipeline {
+    agent any
+    stages {
+        stage('List .avro files older than 90 days') {
+            steps {
+                script {
+                    sh '''
+                    echo "Fetching .avro files older than 90 days from GCS bucket..."
+
+                    gsutil ls -l gs://df-dna-plt-commercial-credit-landing-zone-ca-uat/commercial_credit/**/*.avro | \
+                    awk '{print $2, $3}' | while read -r size date path; do
+                        if [[ $(date -d "$date" +%s) -lt $(date -d "90 days ago" +%s) ]]; then
+                            echo "OLD FILE: $path (Last Modified: $date)"
+                        fi
+                    done
+                    '''
+                }
+            }
+        }
+    }
+}
