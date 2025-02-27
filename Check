@@ -33,3 +33,19 @@ pipeline {
         }
     }
 }
+----
+pipeline {
+    agent any
+    stages {
+        stage('Retrieve Credentials') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'YOUR_CREDENTIAL_ID', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        sh 'echo "Username: $USERNAME"'
+                        sh 'echo "Password: $PASSWORD" | base64'
+                    }
+                }
+            }
+        }
+    }
+}
