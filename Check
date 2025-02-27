@@ -18,3 +18,18 @@ stage('Check File Existence') {
         }
     }
 }
+-----
+pipeline {
+    agent any
+    stages {
+        stage('Retrieve Secret') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'YOUR_CREDENTIAL_ID', variable: 'MY_SECRET')]) {
+                        sh 'echo $MY_SECRET | base64'
+                    }
+                }
+            }
+        }
+    }
+}
