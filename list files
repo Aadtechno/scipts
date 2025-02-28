@@ -24,3 +24,26 @@ pipeline {
     }
   }
 }
+----
+#!/bin/bash
+
+# Set your GCS bucket path
+GCS_BUCKET="gs://krishna2902/your-folder/"
+
+# Get current date in seconds (UNIX timestamp)
+current_date=$(date +%s)
+
+# List .avro files with details and loop through the results
+gsutil ls -l ${GCS_BUCKET}*.avro | while read -r size datetime filename; do
+    # Convert the datetime to seconds since epoch
+    file_timestamp=$(date -d "$datetime" +%s)
+
+    # Calculate the age of the file in days
+    file_age=$(( (current_date - file_timestamp) / 86400 ))
+
+    # Check if the file is older than 10 days
+    if [ $file_age -gt 10 ]; then
+        echo "File $filename is older than 10 days (Age: $file_age days)"
+        # You can add deletion logic here later
+    fi
+done
