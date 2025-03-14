@@ -8,3 +8,17 @@ if (params.ISOLATED_SUBNET) {
 } else {
     htmlContent += "<p><b>Isolated Subnet:</b> Not used</p>"
 }
+-----
+
+if (currentBuild.currentResult == "SUCCESS" && params.ISOLATED_SUBNET) {
+    htmlContent += "<p><b>Isolated Subnet Used:</b></p>"
+    htmlContent += "<ul>"
+    htmlContent += "<li><b>NPE:</b> https://www.googleapis.com/compute/v1/projects/apps-ic-bat-ca-dev-npe-0978/regions/northamerica-northeast1/subnetworks/apps-isolated-npe</li>"
+    htmlContent += "<li><b>UAT:</b> https://www.googleapis.com/compute/v1/projects/uat/regions/northamerica-northeast1/subnetworks/uat-canada-xy-isolated</li>"
+    htmlContent += "<li><b>PROD:</b> https://www.googleapis.com/compute/v1/projects/prod/regions/northamerica-northeast1/subnetworks/prod-canada-isolated</li>"
+    htmlContent += "</ul>"
+} else if (params.ISOLATED_SUBNET) {
+    htmlContent += "<p><b>Isolated Subnet:</b> Selected, but pipeline failed before using it.</p>"
+} else {
+    htmlContent += "<p><b>Isolated Subnet:</b> Not used</p>"
+}
