@@ -1,0 +1,46 @@
+pipeline {
+    agent { label 'gke-access-node' }
+
+    environment {
+        DEPLOYMENTS = "app-1,app-2,app-3"
+        NAMESPACE = "default"
+    }
+
+    stages {
+        stage('Check for Rollouts') {
+            steps {
+                script {
+                    def changed = false
+                    def deployments = env.DEPLOYMENTS.split(',')
+
+                    for (dep in deployments) {
+                        def generation = sh(
+                            script: "kubectl get deploy ${dep} -n ${env.NAMESPACE} -o jsonpath='{.metadata.generation}'",
+                            returnStdout: true
+                        ).trim()
+
+                        def observed = sh(
+                            script: "kubectl get deploy ${dep} -n ${env.NAMESPACE} -o jsonpath='{.status.observedGeneration}'",
+                            returnStdout: true
+                        ).trim()
+
+                        echo "[${dep}] Generation=${generation}, Observed=${observed}"
+
+                        if (generation != observed) {
+                            echo "[${dep}] Deployment changed!"
+                            changed = true
+                            break // trigger on first detected change
+                        }
+                    }
+
+                    if (changed) {
+                        echo "Deployment change detected! Triggering Job-2..."
+                        build job: 'Job-2'
+                    } else {
+                        echo "No changes in monitored deployments."
+                    }
+                }
+            }
+        }
+    }
+}
