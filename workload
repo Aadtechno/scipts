@@ -44,3 +44,60 @@ pipeline {
         }
     }
 }
+------
+pipeline {
+    agent { label 'gke-access-node' }
+
+    environment {
+        DEPLOYMENT = "app-1"
+        NAMESPACE = "default"
+        STATE_FILE = "revision.txt"
+    }
+
+    stages {
+        stage('Restore Previous Revision') {
+            steps {
+                script {
+                    catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                        unstash 'revision-state'
+                    }
+                }
+            }
+        }
+
+        stage('Check Deployment Revision') {
+            steps {
+                script {
+                    def previous = fileExists(STATE_FILE) ? readFile(STATE_FILE).trim() : ""
+
+                    def current = sh(
+                        script: '''
+                            kubectl get deployment ${DEPLOYMENT} -n ${NAMESPACE} \
+                            -o jsonpath="{.metadata.annotations['deployment.kubernetes.io/revision']}"
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+
+                    echo "Previous revision: ${previous}"
+                    echo "Current  revision: ${current}"
+
+                    if (current != previous) {
+                        echo "🔄 Deployment revision changed!"
+                        build job: 'Job-2'
+                        writeFile file: STATE_FILE, text: current
+                    } else {
+                        echo "✅ No deployment change detected."
+                    }
+                }
+            }
+        }
+
+        stage('Save Current Revision') {
+            steps {
+                stash name: 'revision-state', includes: STATE_FILE
+            }
+        }
+    }
+}
+
