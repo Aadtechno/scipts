@@ -1,0 +1,26 @@
+post {
+    always {
+        echo 'Publishing the reports'
+        publishHTMLReport 'Test Results'
+
+        script {
+            def reportLink = "${env.BUILD_URL}cucumber-html-reports/"
+            def cucumberTabLink = "${env.BUILD_URL}cucumber-reports/"
+
+            emailext (
+                subject: "Automation Report: Build #${env.BUILD_NUMBER}",
+                body: """
+                    <p>Hi Team,</p>
+                    <p>The automation run has completed. Please find the reports below:</p>
+                    <ul>
+                      <li><a href="${reportLink}">HTML Report</a></li>
+                      <li><a href="${cucumberTabLink}">Cucumber Visual Report</a></li>
+                    </ul>
+                    <p>Regards,<br/>Jenkins</p>
+                """,
+                mimeType: 'text/html',
+                to: 'your-team@example.com'
+            )
+        }
+    }
+}
