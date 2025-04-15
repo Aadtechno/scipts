@@ -1,0 +1,31 @@
+pipeline {
+    agent { label 'your-node-label' }
+
+    parameters {
+        string(name: 'GCR_IMAGE', defaultValue: 'gcr.io/your-project-id/your-image:tag', description: 'Source GCR Image')
+        string(name: 'GAR_IMAGE', defaultValue: 'us-central1-docker.pkg.dev/your-project-id/your-repo/your-image:tag', description: 'Target GAR Image')
+    }
+
+    stages {
+        stage('Migrate Image from GCR to GAR') {
+            steps {
+                sh '''
+                    echo "🔐 Authenticating Docker with GCR and GAR..."
+                    gcloud auth configure-docker --quiet
+
+                    echo "🐳 Pulling image from GCR: ${GCR_IMAGE}"
+                    docker pull ${GCR_IMAGE}
+
+                    echo "🔁 Tagging image for GAR: ${GAR_IMAGE}"
+                    docker tag ${GCR_IMAGE} ${GAR_IMAGE}
+
+                    echo "📦 Pushing image to GAR: ${GAR_IMAGE}"
+                    docker push ${GAR_IMAGE}
+
+                    echo "🧹 Cleaning up local images..."
+                    docker image rm ${GCR_IMAGE} ${GAR_IMAGE} || true
+                '''
+            }
+        }
+    }
+}
