@@ -1,0 +1,117 @@
+pipeline {
+    agent any
+
+    environment {
+        GCS_BUCKETS = [
+            "gs://bucket1/path", "gs://bucket2/path", "gs://bucket3/path", 
+            "gs://bucket4/path", "gs://bucket5/path", "gs://bucket6/path", "gs://bucket7/path"
+        ]
+        DEST_BUCKET = "gs://destination-bucket/path"
+        PUBLIC_KEY = "path-to-public-key"
+        WORK_DIR = "/tmp/working-dir"
+    }
+
+    triggers {
+        cron('H */6 * * *')  // Trigger every 6 hours
+    }
+
+    stages {
+        stage('Check Files in GCS Buckets and Process') {
+            parallel {
+                stage('Process GCS Bucket 1') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[0]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+                stage('Process GCS Bucket 2') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[1]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+                stage('Process GCS Bucket 3') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[2]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+                stage('Process GCS Bucket 4') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[3]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+                stage('Process GCS Bucket 5') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[4]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+                stage('Process GCS Bucket 6') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[5]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+                stage('Process GCS Bucket 7') {
+                    steps {
+                        script {
+                            def bucket = GCS_BUCKETS[6]
+                            checkAndProcess(bucket)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Shared function to check files and process the bucket
+    def checkAndProcess(bucket) {
+        echo "Scanning ${bucket} for files..."
+        def files = sh(script: "gsutil ls ${bucket}/*", returnStdout: true).trim()
+
+        if (files) {
+            echo "Files found in ${bucket}. Proceeding with encryption and upload."
+            processFiles(bucket, files)
+        } else {
+            echo "No files found in ${bucket}. Skipping..."
+        }
+    }
+
+    // Shared function for file encryption, upload, and deletion
+    def processFiles(bucket, files) {
+        def destID = "DEST_ID"  // Hardcoded for this example; can be dynamically mapped
+        def fileList = files.split("\n")
+        for (file in fileList) {
+            echo "Encrypting file: ${file}"
+            def fileName = file.split("/")[-1]
+            def encryptedFileName = "${destID}_${fileName}.pgp"
+
+            // Download the file
+            sh "gsutil cp ${file} ${WORK_DIR}"
+
+            // Encrypt the file with the public key
+            sh "gpg --import ${PUBLIC_KEY}"
+            sh "gpg --output ${encryptedFileName} --encrypt --recipient ${destID} ${fileName}"
+
+            // Upload the encrypted file to the destination GCS bucket
+            sh "gsutil cp ${encryptedFileName} gs://destination-bucket/path/"
+
+            // Delete the source file after successful upload
+            sh "gsutil rm ${file}"
+        }
+    }
+}
