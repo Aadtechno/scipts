@@ -246,4 +246,47 @@ pipeline {
         }
     }
 }
+------
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'GCS_PATH',
+            defaultValue: 'gs://bucket1/test/internal/taiwan/*/outb/*.txt',
+            description: 'Enter GCS path pattern (e.g., gs://bucket/folder/*.txt)'
+        )
+    }
+
+    stages {
+        stage('List Files Older Than 60 Days') {
+            steps {
+                script {
+                    echo "Listing files in: ${params.GCS_PATH}"
+
+                    sh """
+                        #!/bin/bash
+
+                        CUTOFF=\$(date -d '60 days ago' +%s)
+                        echo "Cutoff Epoch Time: \$CUTOFF"
+                        echo "Files older than 60 days:"
+
+                        gsutil ls -l '${params.GCS_PATH}' 2>/dev/null | awk -v cutoff=\$CUTOFF '
+                            NF == 3 {
+                                timestamp = \$2
+                                file = \$3
+                                cmd = "date -d \\"" timestamp "\\" +%s"
+                                cmd | getline file_epoch
+                                close(cmd)
+                                if (file_epoch < cutoff) {
+                                    print timestamp, file
+                                }
+                            }
+                        '
+                    """
+                }
+            }
+        }
+    }
+}
 
