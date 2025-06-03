@@ -1,0 +1,42 @@
+pipeline {
+    agent any
+
+    environment {
+        GCS_PATHS = """
+            gs://bucket1/test/external
+            gs://bucket1/test/internal
+            gs://bucket1/test/internal/
+            gs://bucket1/test/internal/
+        """
+    }
+
+    stages {
+        stage('Dry Run - File Count and Size') {
+            steps {
+                script {
+                    GCS_PATHS.split().each { path ->
+                        echo "Checking: ${path}"
+                        sh """
+                            echo "File Count (approx):"
+                            gsutil ls -l ${path}/** | wc -l
+
+                            echo "Total Size:"
+                            gsutil du -sh ${path}/
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Delete All Files and Versions') {
+            steps {
+                script {
+                    GCS_PATHS.split().each { path ->
+                        echo "Deleting all versions in: ${path}"
+                        sh "gsutil -m rm -a ${path}/** || true"
+                    }
+                }
+            }
+        }
+    }
+}
