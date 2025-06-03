@@ -152,3 +152,98 @@ pipeline {
         }
     }
 }
+-------------
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'GCS_PATH',
+            defaultValue: 'gs://bucket1/test/taiwan/*.avro',
+            description: 'Enter GCS path pattern (e.g., gs://bucket1/path/*.avro)'
+        )
+        choice(
+            name: 'ACTION',
+            choices: ['LIST_ONLY', 'DELETE_FILES'],
+            description: 'List files or delete them if older than 60 days'
+        )
+    }
+
+    environment {
+        CUTOFF_EPOCH = ''
+    }
+
+    stages {
+        stage('Prepare Cutoff Date') {
+            steps {
+                script {
+                    CUTOFF_EPOCH = sh(script: "date -d '60 days ago' +%s", returnStdout: true).trim()
+                    echo "Cutoff Epoch: ${CUTOFF_EPOCH}"
+                }
+            }
+        }
+
+        stage('List Old Files') {
+            steps {
+                script {
+                    echo "Listing files in ${params.GCS_PATH} older than 60 days..."
+                    sh """
+                        #!/bin/bash
+                        rm -f /tmp/old_files_list.txt
+
+                        gsutil ls -l '${params.GCS_PATH}' 2>/dev/null | awk -v cutoff=${CUTOFF_EPOCH} '
+                            NF == 3 {
+                                cmd = "date -d \\"" \$2 "\\" +%s"
+                                cmd | getline file_epoch
+                                close(cmd)
+                                if (file_epoch < cutoff) {
+                                    print \$3
+                                }
+                            }
+                        ' > /tmp/old_files_list.txt
+
+                        if [[ -s /tmp/old_files_list.txt ]]; then
+                            echo "Old files found:"
+                            cat /tmp/old_files_list.txt
+                        else
+                            echo "No files older than 60 days found."
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('Delete Files') {
+            when {
+                expression { params.ACTION == 'DELETE_FILES' }
+            }
+            steps {
+                script {
+                    def hasFiles = sh(script: 'test -s /tmp/old_files_list.txt', returnStatus: true) == 0
+
+                    if (hasFiles) {
+                        input message: 'Are you sure you want to delete these files?', ok: 'Yes, delete them'
+
+                        sh '''
+                            echo "Deleting files..."
+                            while IFS= read -r file; do
+                                echo "Deleting: $file"
+                                gsutil rm "$file"
+                            done < /tmp/old_files_list.txt
+                        '''
+                    } else {
+                        echo "No files to delete."
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'rm -f /tmp/old_files_list.txt'
+            echo "Pipeline complete for: ${params.GCS_PATH}"
+        }
+    }
+}
+
