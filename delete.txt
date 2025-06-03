@@ -40,3 +40,115 @@ pipeline {
         }
     }
 }
+----------------
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'ACTION',
+            choices: ['LIST_ONLY', 'DELETE_FILES'],
+            description: 'Choose action: List files first, then delete if needed'
+        )
+    }
+
+    environment {
+        BUCKET_PATHS = """
+            gs://bucket1/test/taiwan/*.avro
+            gs://bucket1/test/internal/taiwan/*/outb/*.xls
+            gs://bucket1/test/internal/taiwan/*/outb/*.xlsx
+            gs://bucket1/test/internal/taiwan/*/outb/*.csv
+            gs://bucket1/test/internal/taiwan/*/outb/*.txt
+        """
+    }
+
+    stages {
+        stage('Dry Run - List Files Older Than 60 Days') {
+            steps {
+                script {
+                    sh '''
+                        #!/bin/bash
+
+                        echo "Calculating cutoff timestamp..."
+                        CUTOFF_DATE=$(date -d "60 days ago" +%Y-%m-%dT%H:%M:%SZ)
+                        CUTOFF_EPOCH=$(date -d "$CUTOFF_DATE" +%s)
+                        echo "Cutoff date: $CUTOFF_DATE"
+
+                        # Clear any existing list
+                        rm -f /tmp/old_files_list.txt
+
+                        echo "$BUCKET_PATHS" | while IFS= read -r pattern; do
+                            echo "Checking pattern: $pattern"
+                            gsutil ls -l $pattern 2>/dev/null | awk -v cutoff=$CUTOFF_EPOCH '
+                                NF == 3 {
+                                    cmd = "date -d \\"" $2 "\\" +%s"
+                                    cmd | getline file_epoch
+                                    close(cmd)
+                                    if (file_epoch < cutoff) {
+                                        print $3
+                                    }
+                                }
+                            ' >> /tmp/old_files_list.txt
+                        done
+
+                        if [[ -s /tmp/old_files_list.txt ]]; then
+                            echo "=== OLD FILES FOUND ==="
+                            cat /tmp/old_files_list.txt
+                            echo "========================"
+                            echo "Total files: $(wc -l < /tmp/old_files_list.txt)"
+                        else
+                            echo "No old files found."
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Delete Old Files') {
+            when {
+                expression { params.ACTION == 'DELETE_FILES' }
+            }
+            steps {
+                script {
+                    input message: 'Are you sure you want to delete the listed files?', ok: 'Yes, delete them'
+                    sh '''
+                        #!/bin/bash
+                        if [[ -s /tmp/old_files_list.txt ]]; then
+                            echo "Starting deletion..."
+                            deleted=0
+                            failed=0
+
+                            while IFS= read -r file; do
+                                echo "Deleting: $file"
+                                if gsutil rm "$file" 2>/dev/null; then
+                                    ((deleted++))
+                                else
+                                    ((failed++))
+                                fi
+                            done < /tmp/old_files_list.txt
+
+                            echo "=== DELETION SUMMARY ==="
+                            echo "Deleted: $deleted"
+                            echo "Failed: $failed"
+                        else
+                            echo "No files to delete."
+                        fi
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'rm -f /tmp/old_files_list.txt'
+            echo "Pipeline completed."
+        }
+        success {
+            echo "✅ Pipeline executed successfully!"
+        }
+        failure {
+            echo "❌ Pipeline failed. Check the logs above."
+        }
+    }
+}
