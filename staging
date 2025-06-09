@@ -37,16 +37,22 @@ pipeline {
             steps {
                 sh """
                     echo "" > ${OUTPUT_FILE}
-                    for path in \$(gsutil ls -l ${GCS_SOURCE_PATH} | grep -v '^ *TOTAL:' | grep -v '\\.yml\$'); do
-                        # Extract date and file path
-                        FILE_DATE=\$(echo "\$path" | awk '{print \$2}')
-                        FILE_NAME=\$(echo "\$path" | awk '{print \$4}')
-                        if [ "\$FILE_DATE" != "" ] && [ "\$FILE_NAME" != "" ]; then
-                            if [ "\$(date -d "\$FILE_DATE" +%s)" -le "\$(date -d "${CUTOFF_DATE}" +%s)" ]; then
-                                echo "\$path" | tee -a ${OUTPUT_FILE}
-                            fi
+
+                    gsutil ls -l ${GCS_SOURCE_PATH}** | grep -v '^ *TOTAL:' | while read -r size timestamp filepath; do
+                        # Skip if any field is empty or if it's a YAML file
+                        if [[ -z "$timestamp" || -z "$filepath" || "$filepath" == *.yml ]]; then
+                            continue
+                        fi
+                    
+                        # Compare timestamp with cutoff date
+                        file_epoch=$(date -d "$timestamp" +%s)
+                        cutoff_epoch=$(date -d "${CUTOFF_DATE}" +%s)
+                    
+                        if [[ $file_epoch -le $cutoff_epoch ]]; then
+                            echo "$size  $timestamp  $filepath" | tee -a ${OUTPUT_FILE}
                         fi
                     done
+
                 """
             }
         }
