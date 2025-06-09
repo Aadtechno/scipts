@@ -36,20 +36,17 @@ pipeline {
         stage('List and Filter Files') {
             steps {
                 sh """
-                    echo "" > ${OUTPUT_FILE}
+                    > ${OUTPUT_FILE}
+
+                    cutoff_epoch=\$(date -d "${CUTOFF_DATE}" +%s)
 
                     gsutil ls -l ${GCS_SOURCE_PATH}** | grep -v '^ *TOTAL:' | while read -r size timestamp filepath; do
-                        # Skip if any field is empty or if it's a YAML file
-                        if [[ -z "$timestamp" || -z "$filepath" || "$filepath" == *.yml ]]; then
-                            continue
-                        fi
-                    
-                        # Compare timestamp with cutoff date
-                        file_epoch=$(date -d "$timestamp" +%s)
-                        cutoff_epoch=$(date -d "${CUTOFF_DATE}" +%s)
-                    
-                        if [[ $file_epoch -le $cutoff_epoch ]]; then
-                            echo "$size  $timestamp  $filepath" | tee -a ${OUTPUT_FILE}
+                        [[ -z "\$timestamp" || -z "\$filepath" || "\$filepath" == *.yml ]] && continue
+
+                        file_epoch=\$(date -d "\$timestamp" +%s)
+
+                        if [[ \$file_epoch -le \$cutoff_epoch ]]; then
+                            echo "\$size  \$timestamp  \$filepath" | tee -a ${OUTPUT_FILE}
                         fi
                     done
 
