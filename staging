@@ -2,68 +2,31 @@ pipeline {
     agent { label 'your-gcs-enabled-node' }
 
     environment {
-        OUTPUT_FILE = 'deleted_files_list.txt'
-        CUTOFF_DATE = '2025-03-31'
         GCS_SOURCE_PATH = 'gs://northamerica/canada/internal/*/delete/'
-        GCS_LOG_UPLOAD_PATH = 'gs://your-logging-bucket/path/deleted_files_list.txt'
+        CUTOFF_DATE = '2025-03-31'
     }
 
     stages {
-        stage('Prompt') {
+        stage('Filtered List Files from GCS') {
             steps {
-                script {
-                    echo "============================================================================"
-                    echo "                      GCS File Cleanup - DRY RUN MODE                       "
-                    echo "----------------------------------------------------------------------------"
-                    echo "Scanning path: ${env.GCS_SOURCE_PATH}"
-                    echo
-                    echo "✔ Includes all subfolders"
-                    echo "✔ Filters: Only files modified on or before ${env.CUTOFF_DATE}"
-                    echo "✘ Skips files with .yml extension"
-                    echo
-                    echo "🔎 This is a DRY RUN — NO FILES WILL BE DELETED"
-                    echo "📄 Filtered results will be:"
-                    echo "    - Shown below in Jenkins console output"
-                    echo "    - Saved to ${env.OUTPUT_FILE}"
-                    echo "    - Uploaded to: ${env.GCS_LOG_UPLOAD_PATH}"
-                    echo
-                    echo "💡 Please review before enabling actual deletion logic."
-                    echo "============================================================================"
-                }
-            }
-        }
+                sh '''
+                    echo "Filtering files modified on or before ${CUTOFF_DATE}, excluding *.yml"
 
-        stage('List and Filter Files') {
-            steps {
-                sh """
-                    > ${OUTPUT_FILE}
+                    # Convert cutoff date to epoch
+                    cutoff_epoch=$(date -d "${CUTOFF_DATE}" +%s)
 
-                    cutoff_epoch=\$(date -d "${CUTOFF_DATE}" +%s)
-
+                    # List, filter, and print matching files
                     gsutil ls -l ${GCS_SOURCE_PATH}** | grep -v '^ *TOTAL:' | while read -r size timestamp filepath; do
-                        [[ -z "\$timestamp" || -z "\$filepath" || "\$filepath" == *.yml ]] && continue
+                        [[ -z "$timestamp" || -z "$filepath" || "$filepath" == *.yml ]] && continue
 
-                        file_epoch=\$(date -d "\$timestamp" +%s)
+                        file_epoch=$(date -d "$timestamp" +%s)
 
-                        if [[ \$file_epoch -le \$cutoff_epoch ]]; then
-                            echo "\$size  \$timestamp  \$filepath" | tee -a ${OUTPUT_FILE}
+                        if [[ $file_epoch -le $cutoff_epoch ]]; then
+                            echo "$size  $timestamp  $filepath"
                         fi
                     done
-
-                """
+                '''
             }
-        }
-
-        stage('Upload Report to GCS') {
-            steps {
-                sh "gsutil cp ${OUTPUT_FILE} ${GCS_LOG_UPLOAD_PATH}"
-            }
-        }
-    }
-
-    post {
-        always {
-            echo "Pipeline completed (Dry Run Mode). Please check the uploaded file for review."
         }
     }
 }
