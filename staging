@@ -1,0 +1,66 @@
+pipeline {
+    agent { label 'your-gcs-enabled-node' }
+
+    environment {
+        OUTPUT_FILE = 'deleted_files_list.txt'
+        CUTOFF_DATE = '2025-03-31'
+        GCS_SOURCE_PATH = 'gs://northamerica/canada/internal/*/delete/'
+        GCS_LOG_UPLOAD_PATH = 'gs://your-logging-bucket/path/deleted_files_list.txt'
+    }
+
+    stages {
+        stage('Prompt') {
+            steps {
+                script {
+                    echo "============================================================================"
+                    echo "                      GCS File Cleanup - DRY RUN MODE                       "
+                    echo "----------------------------------------------------------------------------"
+                    echo "Scanning path: ${env.GCS_SOURCE_PATH}"
+                    echo
+                    echo "✔ Includes all subfolders"
+                    echo "✔ Filters: Only files modified on or before ${env.CUTOFF_DATE}"
+                    echo "✘ Skips files with .yml extension"
+                    echo
+                    echo "🔎 This is a DRY RUN — NO FILES WILL BE DELETED"
+                    echo "📄 Filtered results will be:"
+                    echo "    - Shown below in Jenkins console output"
+                    echo "    - Saved to ${env.OUTPUT_FILE}"
+                    echo "    - Uploaded to: ${env.GCS_LOG_UPLOAD_PATH}"
+                    echo
+                    echo "💡 Please review before enabling actual deletion logic."
+                    echo "============================================================================"
+                }
+            }
+        }
+
+        stage('List and Filter Files') {
+            steps {
+                sh """
+                    echo "" > ${OUTPUT_FILE}
+                    for path in \$(gsutil ls -l ${GCS_SOURCE_PATH} | grep -v '^ *TOTAL:' | grep -v '\\.yml\$'); do
+                        # Extract date and file path
+                        FILE_DATE=\$(echo "\$path" | awk '{print \$2}')
+                        FILE_NAME=\$(echo "\$path" | awk '{print \$4}')
+                        if [ "\$FILE_DATE" != "" ] && [ "\$FILE_NAME" != "" ]; then
+                            if [ "\$(date -d "\$FILE_DATE" +%s)" -le "\$(date -d "${CUTOFF_DATE}" +%s)" ]; then
+                                echo "\$path" | tee -a ${OUTPUT_FILE}
+                            fi
+                        fi
+                    done
+                """
+            }
+        }
+
+        stage('Upload Report to GCS') {
+            steps {
+                sh "gsutil cp ${OUTPUT_FILE} ${GCS_LOG_UPLOAD_PATH}"
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline completed (Dry Run Mode). Please check the uploaded file for review."
+        }
+    }
+}
