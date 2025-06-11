@@ -30,3 +30,28 @@ pipeline {
         }
     }
 }
+_________
+#!/bin/bash
+
+INPUT_FILE="gcs_delete_commands.txt"    # Your input file with full 'gsutil rm -a' commands
+LOG_FILE="gcs_deletion_log_$(date +%Y%m%d_%H%M%S).log"
+
+# Make sure the log file is empty before starting
+> "$LOG_FILE"
+
+echo "Starting deletion process at $(date)"
+echo "Logging to $LOG_FILE"
+echo
+
+# Read and execute each line from the file
+while IFS= read -r cmd; do
+  # Skip empty or whitespace-only lines
+  [[ -z "$cmd" || "$cmd" =~ ^[[:space:]]*$ ]] && continue
+
+  echo "Running: $cmd" | tee -a "$LOG_FILE"
+  eval "$cmd" >> "$LOG_FILE" 2>&1
+done < "$INPUT_FILE"
+
+echo
+echo "✅ All commands executed. Final log saved to $LOG_FILE"
+
