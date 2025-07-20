@@ -1,0 +1,43 @@
+pipeline {
+  agent { label 'your-node-label' } // Replace with your Jenkins node label
+
+  triggers {
+    cron('H * * * *') // Every hour
+  }
+
+  environment {
+    GCS_PATH = 'gs://your-bucket/path/**.json'     // Use wildcards if needed
+    BQ_TABLE = 'your-project-id:your_dataset.your_table'
+    FILE_FORMAT = 'NEWLINE_DELIMITED_JSON'
+  }
+
+  stages {
+    stage('Transfer JSON to BigQuery') {
+      steps {
+        script {
+          echo "Starting transfer from GCS to BigQuery..."
+
+          def loadCommand = """
+            bq load \
+              --autodetect \
+              --source_format=${FILE_FORMAT} \
+              --replace=false \
+              ${BQ_TABLE} \
+              ${GCS_PATH}
+          """
+
+          sh loadCommand
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo '✅ BigQuery load completed successfully.'
+    }
+    failure {
+      echo '❌ Failed to load data to BigQuery.'
+    }
+  }
+}
