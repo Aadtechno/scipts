@@ -133,3 +133,64 @@ gs://npebucket/txt2.txt,gs://uatbucket/txt2.txt''',
     }
   }
 }
+----
+pipeline {
+  agent none
+  parameters {
+    text(
+      name: 'npe_uat',
+      defaultValue: '''
+gs://npebucket/txt1.txt,gs://uatbucket/txt1.txt
+gs://npebucket/txt2.txt,gs://uatbucket/txt2.txt
+''',
+      description: 'Each line: SRC_GCS_URI,DST_GCS_URI'
+    )
+  }
+
+  stages {
+    stage('Copy files NPE → UAT') {
+      steps {
+        script {
+          def mappings = params.npe_uat.trim().split("\\r?\\n").findAll { it.trim() }
+          
+          for (int i = 0; i < mappings.size(); i++) {
+            def line = mappings[i]
+            def parts = line.split(',')
+            if (parts.size() != 2) {
+              error "Invalid line format: ${line}"
+            }
+            def SRC = parts[0].trim()
+            def DST = parts.trim()
+            def BASENAME = SRC.tokenize('/').last()
+
+            // Download step on NPE node
+            node('npe-label') {
+              sh """
+                set -euo pipefail
+                echo "Downloading $SRC on NPE node"
+                mkdir -p jars
+                gsutil cp "$SRC" "jars/${BASENAME}"
+              """
+              stash name: "bundle-${i}", includes: "jars/${BASENAME}"
+              sh "rm -f jars/${BASENAME}"
+            }
+
+            // Upload step on UAT node
+            node('uat-label') {
+              unstash "bundle-${i}"
+              sh """
+                set -euo pipefail
+                echo "Uploading ${BASENAME} to $DST on UAT node"
+                gsutil cp "jars/${BASENAME}" "$DST"
+                echo "Verify destination:"
+                gsutil ls -l "$DST"
+                echo "\\033[0;32mSUCCESS: ${BASENAME} copied to ${DST}\\033[0m"
+                rm -f jars/${BASENAME}
+              """
+            }
+          }
+        }
+      }
+    }
+  }
+}
