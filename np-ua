@@ -134,57 +134,76 @@ gs://npebucket/txt2.txt,gs://uatbucket/txt2.txt''',
   }
 }
 ----
-node {
-  stage('NPE to UAT File Copy') {
-    // Define your parameter here or pass externally
-    // Example parameter input; replace with actual parameter fetch if needed
-    def npe_uat = """
-gs://npebucket/txt1.txt,gs://uatbucket/txt1.txt
-gs://npebucket/txt2.txt,gs://uatbucket/txt2.txt
-""".trim()
+properties([
+  parameters([
+    text(
+      name: 'npe_uat',
+      defaultValue: '',
+      description: 'Each line = SRC_GCS_URI,DST_GCS_URI'
+    )
+  ])
+])
 
-    def lines = npe_uat.split("\\r?\\n").findAll { it.trim() }
+// Update these labels:
+def NPE = 'npe-label'
+def UAT = 'uat-label'
 
-    for (int i = 0; i < lines.size(); i++) {
-      def line = lines[i]
-      def parts = line.split(',')
-      if (parts.size() != 2) {
-        error "Invalid input line: ${line}"
+// Parse & validate input up-front
+def lines = (params.npe_uat ?: '').trim().readLines().findAll { it.trim() }
+if (lines.isEmpty()) {
+  error "Parameter 'npe_uat' is empty. Provide one or more lines like: gs://npe/.../a.txt,gs://uat/.../a.txt"
+}
+
+echo "Promoting ${lines.size()} item(s) NPE → UAT..."
+
+lines.eachWithIndex { line, i ->
+  def parts = line.split(',', 2)
+  if (parts.size() != 2) { error "Invalid line (need SRC,DST): '${line}'" }
+
+  def SRC = parts[0].trim()
+  def DST = parts[1].trim()
+  if (!(SRC.startsWith('gs://') && DST.startsWith('gs://'))) {
+    error "Both SRC and DST must start with gs:// (got SRC='${SRC}', DST='${DST}')"
+  }
+
+  def BN   = SRC.tokenize('/').last()
+  def ST   = "item-${i}-${BN}"
+  def idx  = "${i+1}/${lines.size()}"
+
+  stage("Promote ${BN} (${idx})") {
+
+    // NPE: download & stash
+    node(NPE) {
+      dir('npe-to-uat') {
+        deleteDir()
+        sh """
+          set -e
+          mkdir -p jars
+          echo "[NPE] ${SRC} -> jars/${BN}"
+          gsutil -q cp "${SRC}" "jars/${BN}"
+          test -f "jars/${BN}"
+        """
+        stash name: ST, includes: "jars/${BN}"
       }
-      def SRC = parts[0].trim()
-      def DST = parts.trim()
-      def BASENAME = SRC.tokenize('/').last()
+    }
 
-      // Download file on NPE node
-      node('npe-label') {
-        stage("Download ${BASENAME} from NPE") {
-          sh """
-            set -euo pipefail
-            mkdir -p jars
-            echo "Downloading $SRC from NPE node"
-            gsutil cp "$SRC" jars/"$BASENAME"
-          """
-          stash includes: "jars/${BASENAME}", name: "bundle-${i}"
-          sh "rm -f jars/${BASENAME}"
-        }
-      }
-
-      // Upload file on UAT node
-      node('uat-label') {
-        stage("Upload ${BASENAME} to UAT") {
-          unstash "bundle-${i}"
-          sh """
-            set -euo pipefail
-            echo "Uploading ${BASENAME} to $DST on UAT node"
-            gsutil cp "jars/${BASENAME}" "$DST"
-            echo "Verification:"
-            gsutil ls -l "$DST"
-            echo "\\033[0;32mSUCCESS: ${BASENAME} copied to ${DST}\\033[0m"
-            rm -f jars/${BASENAME}
-          """
-        }
+    // UAT: unstash, upload, verify, clean
+    node(UAT) {
+      dir('npe-to-uat') {
+        deleteDir()
+        unstash ST
+        sh """
+          set -e
+          FILE="jars/${BN}"
+          echo "[UAT] ${FILE} -> ${DST}"
+          gsutil -q cp "$FILE" "${DST}"
+          gsutil ls -l "${DST}" || true
+          rm -f "$FILE"
+          echo "[OK] ${BN} done"
+        """
       }
     }
   }
 }
 
+echo "All items processed successfully."
