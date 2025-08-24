@@ -68,3 +68,93 @@ pipeline {
         }
     }
 }
+---------------------
+properties([
+  buildDiscarder(logRotator(
+    artifactDaysToKeepStr: '',
+    artifactNumToKeepStr: '',
+    daysToKeepStr: '',
+    numToKeepStr: '10'))
+])
+
+pipeline {
+  agent any
+
+  parameters {
+    // One pair per line: SRC,DST
+    // Example:
+    // gs://npe-bucket/folder/a.txt,gs://uat-bucket/folder/a.txt
+    text(
+      name: 'npe_uat',
+      defaultValue: 'gs://npe-bucket/folder/a.txt,gs://uat-bucket/folder/a.txt',
+      description: 'Each line = "SRC_GCS_URI,DST_GCS_URI" (no spaces around comma).'
+    )
+  }
+
+  stages {
+    stage('Process files one by one') {
+      steps {
+        dir("${WORKSPACE}/jenkins/npe-to-uat/") {
+          sh '''
+            set -euo pipefail
+            echo "Workspace: $(pwd)"
+            rm -rf jars && mkdir -p jars
+
+            # Iterate each non-empty line
+            echo "$npe_uat" | awk 'NF' | while IFS= read -r LINE; do
+              # Trim line
+              LINE="$(printf "%s" "$LINE" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+
+              # Split into SRC,DST
+              IFS=',' read -r SRC DST <<EOF
+$LINE
+EOF
+
+              # Trim each
+              SRC="$(printf "%s" "$SRC" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+              DST="$(printf "%s" "$DST" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+
+              # Validate
+              if [ -z "$SRC" ] || [ -z "$DST" ]; then
+                echo "ERROR: Invalid line (missing SRC or DST): [$LINE]"
+                exit 1
+              fi
+              case "$SRC" in gs://*) ;; *) echo "ERROR: SRC must start with gs:// -> [$SRC]"; exit 1;; esac
+              case "$DST" in gs://*) ;; *) echo "ERROR: DST must start with gs:// -> [$DST]"; exit 1;; esac
+
+              echo ">>> Processing:"
+              echo "    SRC: $SRC"
+              echo "    DST: $DST"
+
+              # Download to jars/
+              gsutil cp "$SRC" ./jars/
+
+              # Determine local filename (no find needed)
+              FILE="./jars/$(basename "$SRC")"
+              if [ ! -f "$FILE" ]; then
+                echo "ERROR: Expected downloaded file not found: $FILE"
+                exit 1
+              fi
+
+              # Upload to destination
+              echo "Uploading $FILE -> $DST"
+              gsutil cp "$FILE" "$DST"
+
+              # Verify destination
+              echo "Destination listing:"
+              gsutil ls -l "$DST" || true
+
+              # Delete local file before next
+              rm -f "$FILE"
+              echo "Cleaned: $FILE"
+              echo "----------------------------------------"
+            done
+
+            echo "All pairs processed."
+          '''
+        }
+      }
+    }
+  }
+}
+
