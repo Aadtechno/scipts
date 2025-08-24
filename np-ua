@@ -1,0 +1,70 @@
+properties([
+    buildDiscarder(logRotator(
+        artifactDaysToKeepStr: '',
+        artifactNumToKeepStr: '',
+        daysToKeepStr: '',
+        numToKeepStr: '10'))
+])
+
+pipeline {
+    agent any
+
+    parameters {
+        text(name: 'npe_uat',
+             defaultValue: 'gs://npe-bucket/folder/a.txt,gs://uat-bucket/folder/a.txt',
+             description: 'Provide source and destination GCS paths separated by comma.\n' +
+                          'Example: gs://npe-bucket/folder/a.txt,gs://uat-bucket/folder/a.txt')
+    }
+
+    stages {
+        stage("Parse & Validate") {
+            steps {
+                script {
+                    def parts = params.npe_uat.split(",")
+                    if (parts.size() != 2) {
+                        error "Invalid input. Must provide exactly two comma-separated URIs."
+                    }
+                    env.SOURCE = parts[0].trim()
+                    env.DEST   = parts[1].trim()
+
+                    if (!env.SOURCE.startsWith("gs://") || !env.DEST.startsWith("gs://")) {
+                        error "Both source and destination must start with gs://"
+                    }
+
+                    echo "Source : ${env.SOURCE}"
+                    echo "Dest   : ${env.DEST}"
+                }
+            }
+        }
+
+        stage("Download file to Jenkins node") {
+            steps {
+                dir("${WORKSPACE}/jenkins/npe-to-uat/") {
+                    sh '''
+                        set -xe
+                        mkdir -p payload
+                        gsutil cp "${SOURCE}" ./payload/
+                        gsutil ls -l "${SOURCE}" || true
+                        ls -lah ./payload
+                    '''
+                    stash name: 'artifact', includes: 'payload/**', allowEmpty: false
+                }
+            }
+        }
+
+        stage("Upload file to UAT") {
+            steps {
+                dir("${WORKSPACE}/jenkins/npe-to-uat/") {
+                    unstash 'artifact'
+                    sh '''
+                        set -xe
+                        FILE=$(find ./payload -type f)
+                        echo "Uploading $FILE -> ${DEST}"
+                        gsutil cp "$FILE" "${DEST}"
+                        gsutil ls -l "${DEST}" || true
+                    '''
+                }
+            }
+        }
+    }
+}
