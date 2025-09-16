@@ -207,3 +207,102 @@ lines.eachWithIndex { line, i ->
 }
 
 echo "All items processed successfully."
+------------------------------------------
+// === Parameters ===
+properties([
+  parameters([
+    text(
+      name: 'modules',
+      defaultValue: 'moduleA\nmoduleB',
+      description: 'One module name per line (no commas).'
+    )
+  ])
+])
+
+// === Hard-coded endpoints (edit if hosts/paths change) ===
+def UAT_BASE     = 'https://global-batch-app.uat.dfds/config/bu/ca-uat-prd/modules'
+def PROMOTE_BASE = 'https://global-batch-app.alpha.dfds/config/bu/alpha-npe/destbu/apps-ic-bat-ca-uat-prd/modules'
+
+// === Waits ===
+def SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC = 30   // per module
+def WAIT_BEFORE_PUBLISH_MIN                 = 8    // per module
+
+// === Auth (optional for now) ===
+// If you already have a Jenkins "Secret text" credential for the bearer token,
+// put its ID below and uncomment the withCredentials block in the main run loop.
+def TOKEN_CRED_ID = null   // e.g., 'CONFIG_API_TOKEN'
+
+// ===== Helpers =====
+def httpPost = { label, url, tokenValue ->
+  echo "[${label}] POST ${url}"
+  def authHdr = (tokenValue?.trim()) ? "-H 'Authorization: Bearer ${tokenValue.trim()}'" : ""
+  sh """
+    set -euo pipefail
+    STATUS=\$(curl -sS -X POST ${authHdr} -H 'Content-Type: application/json' -w '%{http_code}' -o /dev/null '${url}')
+    echo "HTTP_STATUS=\$STATUS"
+    case "\$STATUS" in
+      2*) exit 0 ;;
+      *)  echo "Request failed with HTTP \$STATUS for ${label} (${url})" >&2; exit 1 ;;
+    esac
+  """
+}
+
+// ===== Main =====
+node { // run on any node; switch to a label if you like
+  stage('Init & Parse') {
+    // Parse modules: one per line, trim, unique
+    modules = (params.modules ?: '').trim().readLines()
+               .collect { it.trim() }
+               .findAll { it }
+               .unique()
+
+    if (modules.isEmpty()) {
+      error "Parameter 'modules' is empty. Provide one module name per line."
+    }
+    echo "Modules to process: ${modules}"
+    echo "UAT base: ${UAT_BASE}"
+    echo "PROMOTE base: ${PROMOTE_BASE}"
+    echo "Per-module waits: ${SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC}s then ${WAIT_BEFORE_PUBLISH_MIN}m"
+  }
+
+  // If you have a token credential, uncomment this block and set TOKEN_CRED_ID above.
+  // def tokenValue = ''
+  // if (TOKEN_CRED_ID) {
+  //   withCredentials([string(credentialsId: TOKEN_CRED_ID, variable: 'CONFIG_API_TOKEN')]) {
+  //     tokenValue = env.CONFIG_API_TOKEN
+  //   }
+  // }
+
+  // No-credential default:
+  def tokenValue = ''
+
+  modules.eachWithIndex { m, i ->
+    def idx = "${i+1}/${modules.size()}"
+
+    stage("Unpublish — ${m} (${idx})") {
+      def url = "${UAT_BASE}/${m}/unpublish"
+      httpPost("UAT Unpublish ${m}", url, tokenValue)
+    }
+
+    stage("Promote — ${m} (${idx})") {
+      sleep time: SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC, unit: 'SECONDS'
+      def url = "${PROMOTE_BASE}/${m}/promote"
+      httpPost("NPE→UAT Promote ${m}", url, tokenValue)
+    }
+
+    stage("Wait — ${m} (${idx})") {
+      echo "Waiting ${WAIT_BEFORE_PUBLISH_MIN} minute(s) before publishing ${m}…"
+      sleep time: WAIT_BEFORE_PUBLISH_MIN, unit: 'MINUTES'
+    }
+
+    stage("Publish — ${m} (${idx})") {
+      def url = "${UAT_BASE}/${m}/publish"
+      httpPost("UAT Publish ${m}", url, tokenValue)
+    }
+  }
+
+  stage('Done') {
+    echo "✅ All modules processed successfully."
+  }
+}
+
