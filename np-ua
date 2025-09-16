@@ -208,7 +208,12 @@ lines.eachWithIndex { line, i ->
 
 echo "All items processed successfully."
 ------------------------------------------
-// === Parameters ===
+// ──────────────────────────────────────────────────────────────────────────────
+// Jenkins Scripted Pipeline: NPE → UAT module promotion (per-module flow)
+// Tokens: PROD token used for Unpublish/Publish; NPE token used for Promote.
+// Steps per module: Unpublish → 30s → Promote → 8m → Publish
+// ──────────────────────────────────────────────────────────────────────────────
+
 properties([
   parameters([
     text(
@@ -219,75 +224,95 @@ properties([
   ])
 ])
 
-// === Hard-coded endpoints (edit if hosts/paths change) ===
-def UAT_BASE     = 'https://global-batch-app.uat.dfds/config/bu/ca-uat-prd/modules'
-def PROMOTE_BASE = 'https://global-batch-app.alpha.dfds/config/bu/alpha-npe/destbu/apps-ic-bat-ca-uat-prd/modules'
+// ── Hard-coded API bases (edit if hosts/paths change) ────────────────────────
+final String UAT_BASE     = 'https://global-batch-app.uat.dfds/config/bu/ca-uat-prd/modules'
+final String PROMOTE_BASE = 'https://global-batch-app.alpha.dfds/config/bu/alpha-npe/destbu/apps-ic-bat-ca-uat-prd/modules'
 
-// === Waits ===
-def SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC = 30   // per module
-def WAIT_BEFORE_PUBLISH_MIN                 = 8    // per module
+// ── Waits ────────────────────────────────────────────────────────────────────
+final int SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC = 30   // per module
+final int WAIT_BEFORE_PUBLISH_MIN                 = 8    // per module
 
-// === Auth (optional for now) ===
-// If you already have a Jenkins "Secret text" credential for the bearer token,
-// put its ID below and uncomment the withCredentials block in the main run loop.
-def TOKEN_CRED_ID = null   // e.g., 'CONFIG_API_TOKEN'
+// ── OAuth token endpoints + Jenkins credential IDs ───────────────────────────
+// Store these as Jenkins "Username with password":
+//   - ID: CLIENT_API_SNAPSHOT        (username = CLIENT_ID, password = CLIENT_SECRET)  → NPE token
+//   - ID: CLIENT_API_SNAPSHOT_PROD   (username = CLIENT_ID, password = CLIENT_SECRET)  → PROD token
+final String NPE_TOKEN_URL  = 'https://fedssoqa.equifax.com/as/token.oauth2'
+final String NPE_CRED_ID    = 'CLIENT_API_SNAPSHOT'
+final String PROD_TOKEN_URL = 'https://fedsso.equifax.com/as/token.oauth2'
+final String PROD_CRED_ID   = 'CLIENT_API_SNAPSHOT_PROD'
 
-// ===== Helpers =====
-def httpPost = { label, url, tokenValue ->
+// ── Helpers ──────────────────────────────────────────────────────────────────
+/** Obtain OAuth2 client-credentials token using curl + jq from given URL/cred. */
+String fetchToken(String oauthUrl, String credId, String label) {
+  String token = ''
+  withCredentials([usernamePassword(credentialsId: credId, usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET')]) {
+    String body = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+    token = sh(
+      label: "Generate OAuth token (${label})",
+      script: """
+        set -euo pipefail
+        curl -sS -X POST \\
+          -H 'Content-Type: application/x-www-form-urlencoded' \\
+          -d '${body}' '${oauthUrl}' | jq -r '.access_token'
+      """,
+      returnStdout: true
+    ).trim()
+  }
+  if (!token) { error "Failed to obtain OAuth token for ${label} (empty token)." }
+  return token
+}
+
+/** Minimal POST helper with Bearer token; fails on non-2xx. */
+void postWithToken(String label, String url, String token) {
   echo "[${label}] POST ${url}"
-  def authHdr = (tokenValue?.trim()) ? "-H 'Authorization: Bearer ${tokenValue.trim()}'" : ""
   sh """
     set -euo pipefail
-    STATUS=\$(curl -sS -X POST ${authHdr} -H 'Content-Type: application/json' -w '%{http_code}' -o /dev/null '${url}')
+    STATUS=\$(curl -sS -X POST \\
+      -H 'Authorization: Bearer ${token}' \\
+      -H 'Content-Type: application/json' \\
+      -w '%{http_code}' -o /dev/null '${url}')
     echo "HTTP_STATUS=\$STATUS"
-    case "\$STATUS" in
-      2*) exit 0 ;;
-      *)  echo "Request failed with HTTP \$STATUS for ${label} (${url})" >&2; exit 1 ;;
-    esac
+    case "\$STATUS" in 2*) : ;; *) echo "Request failed: \$STATUS (${label})" >&2; exit 1;; esac
   """
 }
 
-// ===== Main =====
-node { // run on any node; switch to a label if you like
-  stage('Init & Parse') {
-    // Parse modules: one per line, trim, unique
-    modules = (params.modules ?: '').trim().readLines()
-               .collect { it.trim() }
-               .findAll { it }
-               .unique()
+// ── Main ─────────────────────────────────────────────────────────────────────
+node {
+  stage('Init & Tokens') {
+    // Parse module list (one per line)
+    modules = (params.modules ?: '')
+                .trim()
+                .readLines()
+                .collect { it.trim() }
+                .findAll { it }
+                .unique()
 
     if (modules.isEmpty()) {
-      error "Parameter 'modules' is empty. Provide one module name per line."
+      error "Parameter 'modules' is empty. Provide one module per line."
     }
-    echo "Modules to process: ${modules}"
-    echo "UAT base: ${UAT_BASE}"
-    echo "PROMOTE base: ${PROMOTE_BASE}"
+
+    echo "Modules: ${modules}"
+    echo "UAT base     : ${UAT_BASE}"
+    echo "PROMOTE base : ${PROMOTE_BASE}"
     echo "Per-module waits: ${SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC}s then ${WAIT_BEFORE_PUBLISH_MIN}m"
+
+    // Fetch both tokens once
+    NPE_TOKEN  = fetchToken(NPE_TOKEN_URL,  NPE_CRED_ID,  'NPE')
+    PROD_TOKEN = fetchToken(PROD_TOKEN_URL, PROD_CRED_ID, 'PROD')
+    echo '✅ Obtained NPE and PROD tokens.'
   }
 
-  // If you have a token credential, uncomment this block and set TOKEN_CRED_ID above.
-  // def tokenValue = ''
-  // if (TOKEN_CRED_ID) {
-  //   withCredentials([string(credentialsId: TOKEN_CRED_ID, variable: 'CONFIG_API_TOKEN')]) {
-  //     tokenValue = env.CONFIG_API_TOKEN
-  //   }
-  // }
-
-  // No-credential default:
-  def tokenValue = ''
-
+  // Per-module flow using the appropriate token per step
   modules.eachWithIndex { m, i ->
     def idx = "${i+1}/${modules.size()}"
 
     stage("Unpublish — ${m} (${idx})") {
-      def url = "${UAT_BASE}/${m}/unpublish"
-      httpPost("UAT Unpublish ${m}", url, tokenValue)
+      postWithToken("UAT Unpublish ${m}", "${UAT_BASE}/${m}/unpublish", PROD_TOKEN)
     }
 
     stage("Promote — ${m} (${idx})") {
       sleep time: SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC, unit: 'SECONDS'
-      def url = "${PROMOTE_BASE}/${m}/promote"
-      httpPost("NPE→UAT Promote ${m}", url, tokenValue)
+      postWithToken("NPE→UAT Promote ${m}", "${PROMOTE_BASE}/${m}/promote", NPE_TOKEN)
     }
 
     stage("Wait — ${m} (${idx})") {
@@ -296,13 +321,13 @@ node { // run on any node; switch to a label if you like
     }
 
     stage("Publish — ${m} (${idx})") {
-      def url = "${UAT_BASE}/${m}/publish"
-      httpPost("UAT Publish ${m}", url, tokenValue)
+      postWithToken("UAT Publish ${m}", "${UAT_BASE}/${m}/publish", PROD_TOKEN)
     }
   }
 
   stage('Done') {
-    echo "✅ All modules processed successfully."
+    echo '✅ All modules processed successfully.'
   }
 }
+
 
