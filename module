@@ -1,0 +1,144 @@
+pipeline {
+  agent any
+
+  parameters {
+    text(name: 'modules',
+         defaultValue: 'moduleA\nmoduleB',
+         description: 'One module name per line (no commas).')
+  }
+
+  options {
+    timestamps()
+    ansiColor('xterm')
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    // API bases
+    UAT_BASE     = 'https://global-batch-app.uat.dfds/config/bu/ca-uat-prd/modules'
+    PROMOTE_BASE = 'https://global-batch-app.alpha.dfds/config/bu/alpha-npe/destbu/apps-ic-bat-ca-uat-prd/modules'
+
+    // Waits
+    SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC = '30'
+    WAIT_BEFORE_PUBLISH_MIN                 = '8'
+
+    // Token endpoints + Jenkins credential IDs
+    NPE_TOKEN_URL  = 'https://fedssoqa.equifax.com/as/token.oauth2'
+    NPE_CRED_ID    = 'CLIENT_API_SNAPSHOT'
+    PROD_TOKEN_URL = 'https://fedsso.equifax.com/as/token.oauth2'
+    PROD_CRED_ID   = 'CLIENT_API_SNAPSHOT_PROD'
+  }
+
+  stages {
+    stage('Init & Tokens') {
+      steps {
+        script {
+          // --- helpers (closures) ---
+          def fetchToken = { String oauthUrl, String credId, String label ->
+            withCredentials([usernamePassword(credentialsId: credId, usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET')]) {
+              def body = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+              def tok = sh(
+                label: "Generate OAuth token (${label})",
+                // keep strict here; fail only if command actually errors
+                script: """
+                  set -eo pipefail
+                  curl -sS -X POST \\
+                    -H 'Content-Type: application/x-www-form-urlencoded' \\
+                    -d '${body}' '${oauthUrl}' | jq -r '.access_token'
+                """,
+                returnStdout: true
+              ).trim()
+              if (!tok) { error "Failed to obtain OAuth token for ${label} (empty token)." }
+              return tok
+            }
+          }
+
+          def postWithTokenReturnStdout = { String url, String token ->
+            return sh(
+              returnStdout: true,
+              script: """
+                # intentionally no 'set -e' so non-2xx won't fail the build
+                curl -sS -X POST \\
+                  -H 'Authorization: Bearer ${token}' \\
+                  -H 'Content-Type: application/json' \\
+                  -w '\\nHTTP_STATUS:%{http_code}\\n' \\
+                  '${url}'
+              """
+            ).trim()
+          }
+
+          // Parse modules
+          def list = (params.modules ?: '').trim().readLines()
+                        .collect { it.trim() }.findAll { it }.unique()
+          if (list.isEmpty()) {
+            error "Parameter 'modules' is empty. Provide one module per line."
+          }
+          env.MODULES_JSON = groovy.json.JsonOutput.toJson(list)
+
+          echo "Modules: ${list}"
+          echo "Per-module waits: ${env.SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC}s then ${env.WAIT_BEFORE_PUBLISH_MIN}m"
+
+          // Tokens (once)
+          env.NPE_TOKEN  = fetchToken(env.NPE_TOKEN_URL,  env.NPE_CRED_ID,  'NPE')
+          env.PROD_TOKEN = fetchToken(env.PROD_TOKEN_URL, env.PROD_CRED_ID, 'PROD')
+          echo '✅ Obtained NPE and PROD tokens.'
+
+          // Stash helpers into env for next stage via Groovy serialization workaround:
+          // we re-declare closures in the next script block (cannot store closures in env).
+          // Just keeping this stage for tokens + parsed modules.
+        }
+      }
+    }
+
+    stage('Process Modules') {
+      steps {
+        script {
+          // re-declare helpers (closures don't survive stage boundaries cleanly)
+          def postWithTokenReturnStdout = { String url, String token ->
+            return sh(
+              returnStdout: true,
+              script: """
+                curl -sS -X POST \\
+                  -H 'Authorization: Bearer ${token}' \\
+                  -H 'Content-Type: application/json' \\
+                  -w '\\nHTTP_STATUS:%{http_code}\\n' \\
+                  '${url}'
+              """
+            ).trim()
+          }
+
+          def modules = new groovy.json.JsonSlurperClassic().parseText(env.MODULES_JSON)
+          modules.eachWithIndex { m, i ->
+            def idx = "${i+1}/${modules.size()}"
+
+            stage("Unpublish — ${m} (${idx})") {
+              def out = postWithTokenReturnStdout("${env.UAT_BASE}/${m}/unpublish", env.PROD_TOKEN)
+              echo "[UNPUBLISH ${m}] Response:\n${out}"
+            }
+
+            stage("Promote — ${m} (${idx})") {
+              sleep time: env.SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC as int, unit: 'SECONDS'
+              def out = postWithTokenReturnStdout("${env.PROMOTE_BASE}/${m}/promote", env.NPE_TOKEN)
+              echo "[PROMOTE ${m}] Response:\n${out}"
+            }
+
+            stage("Wait — ${m} (${idx})") {
+              echo "Waiting ${env.WAIT_BEFORE_PUBLISH_MIN} minute(s) before publishing ${m}…"
+              sleep time: env.WAIT_BEFORE_PUBLISH_MIN as int, unit: 'MINUTES'
+            }
+
+            stage("Publish — ${m} (${idx})") {
+              def out = postWithTokenReturnStdout("${env.UAT_BASE}/${m}/publish", env.PROD_TOKEN)
+              echo "[PUBLISH ${m}] Response:\n${out}"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success { echo '✅ All modules processed (no hard fail on HTTP status).' }
+    failure { echo '❌ Pipeline failed (likely during token fetch or parsing).' }
+  }
+}
