@@ -142,3 +142,31 @@ pipeline {
     failure { echo '❌ Pipeline failed (likely during token fetch or parsing).' }
   }
 }
+----
+stage('Generate OAuth 2.0 Tokens') {
+  steps {
+    script {
+      // --- NPE token (for PROMOTE) ---
+      def npeOauthUrl = 'https://fedssoqa.equifax.com/as/token.oauth2'      // <-- change if needed
+      withCredentials([usernamePassword(credentialsId: 'NPE-OAUTH', usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET')]) {
+        def req = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+        def npeToken = sh(returnStdout: true, script: "curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d '${req}' ${npeOauthUrl} | jq -r '.access_token'").trim()
+        if (!npeToken) { error 'Failed to obtain NPE OAuth token' }
+        env.NPE_TOKEN = npeToken
+      }
+
+      // --- UAT token (for UNPUBLISH/PUBLISH) ---
+      def uatOauthUrl = 'https://fedsso.equifax.com/as/token.oauth2'        // <-- change if needed
+      withCredentials([usernamePassword(credentialsId: 'UAT-PROD-OAUTH', usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET')]) {
+        def req = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+        def uatToken = sh(returnStdout: true, script: "curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d '${req}' ${uatOauthUrl} | jq -r '.access_token'").trim()
+        if (!uatToken) { error 'Failed to obtain UAT OAuth token' }
+        env.UAT_TOKEN = uatToken
+      }
+
+      currentBuild.description = "OAuth: NPE & UAT tokens generated"
+      echo '✅ Tokens ready: NPE_TOKEN (promote), UAT_TOKEN (un/publish)'
+    }
+  }
+}
+
