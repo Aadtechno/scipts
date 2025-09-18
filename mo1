@@ -1,0 +1,111 @@
+pipeline {
+  agent any
+
+  parameters {
+    text(name: 'modules',
+         defaultValue: 'moduleA\nmoduleB',
+         description: 'One module name per line (no commas).')
+  }
+
+  options {
+    timestamps()
+    ansiColor('xterm')
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    // API bases
+    UAT_BASE     = 'https://global-batch-app.uat.dfds/config/bu/ca-uat-prd/modules'
+    PROMOTE_BASE = 'https://global-batch-app.alpha.dfds/config/bu/alpha-npe/destbu/apps-ic-bat-ca-uat-prd/modules'
+
+    // Waits
+    SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC = '30'
+    WAIT_BEFORE_PUBLISH_MIN                 = '8'
+  }
+
+  stages {
+
+    // ── Generate both tokens up front ────────────────────────────────────────
+    stage('Generate OAuth 2.0 Tokens') {
+      steps {
+        script {
+          // NPE token (for Promote)
+          def npeOauthUrl = 'https://fedssoqa.equifax.com/as/token.oauth2'
+          withCredentials([usernamePassword(credentialsId: 'NPE-OAUTH', usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET')]) {
+            def req = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+            def npeToken = sh(returnStdout: true, script: "curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d '${req}' ${npeOauthUrl} | jq -r '.access_token'").trim()
+            if (!npeToken) { error 'Failed to obtain NPE OAuth token' }
+            env.NPE_TOKEN = npeToken
+          }
+
+          // UAT token (for Unpublish/Publish)
+          def uatOauthUrl = 'https://fedsso.equifax.com/as/token.oauth2'
+          withCredentials([usernamePassword(credentialsId: 'UAT-PROD-OAUTH', usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET')]) {
+            def req = "client_id=${env.CLIENT_ID}&client_secret=${env.CLIENT_SECRET}&grant_type=client_credentials"
+            def uatToken = sh(returnStdout: true, script: "curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d '${req}' ${uatOauthUrl} | jq -r '.access_token'").trim()
+            if (!uatToken) { error 'Failed to obtain UAT OAuth token' }
+            env.UAT_TOKEN = uatToken
+          }
+
+          currentBuild.description = "OAuth: NPE & UAT tokens generated"
+          echo '✅ Tokens ready: NPE_TOKEN (promote), UAT_TOKEN (un/publish)'
+        }
+      }
+    }
+
+    // ── Parse modules + run per-module flow ──────────────────────────────────
+    stage('Process Modules') {
+      steps {
+        script {
+          // Parse/validate modules here (no separate Init stage)
+          def modules = (params.modules ?: '')
+                          .trim()
+                          .readLines()
+                          .collect { it.trim() }
+                          .findAll { it }
+                          .unique()
+          if (modules.isEmpty()) {
+            error "Parameter 'modules' is empty. Provide one module per line."
+          }
+          echo "Modules: ${modules}"
+          echo "Per-module waits: ${env.SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC}s then ${env.WAIT_BEFORE_PUBLISH_MIN}m"
+
+          // Helper: POST and print response (no fail on non-200)
+          def postWithTokenReturnStdout = { String url, String token ->
+            sh(returnStdout: true, script: "curl -s -X POST -H 'Authorization: Bearer ${token}' -H 'Content-Type: application/json' -w '\\nHTTP_STATUS:%{http_code}\\n' '${url}'").trim()
+          }
+
+          modules.eachWithIndex { m, i ->
+            def idx = "${i+1}/${modules.size()}"
+
+            stage("Unpublish — ${m} (${idx})") {
+              def out = postWithTokenReturnStdout("${env.UAT_BASE}/${m}/unpublish", env.UAT_TOKEN)
+              echo "[UNPUBLISH ${m}] Response:\n${out}"
+            }
+
+            stage("Promote — ${m} (${idx})") {
+              sleep time: env.SLEEP_BETWEEN_UNPUBLISH_AND_PROMOTE_SEC as int, unit: 'SECONDS'
+              def out = postWithTokenReturnStdout("${env.PROMOTE_BASE}/${m}/promote", env.NPE_TOKEN)
+              echo "[PROMOTE ${m}] Response:\n${out}"
+            }
+
+            stage("Wait — ${m} (${idx})") {
+              echo "Waiting ${env.WAIT_BEFORE_PUBLISH_MIN} minute(s) before publishing ${m}…"
+              sleep time: env.WAIT_BEFORE_PUBLISH_MIN as int, unit: 'MINUTES'
+            }
+
+            stage("Publish — ${m} (${idx})") {
+              def out = postWithTokenReturnStdout("${env.UAT_BASE}/${m}/publish", env.UAT_TOKEN)
+              echo "[PUBLISH ${m}] Response:\n${out}"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success { echo '✅ All modules processed (no hard fail on HTTP status).' }
+    failure { echo '❌ Pipeline failed (likely during token fetch or parsing).' }
+  }
+}
