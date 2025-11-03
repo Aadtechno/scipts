@@ -1,0 +1,28 @@
+You are an expert DevOps and CI/CD engineer specializing in Jenkins pipelines for GCP and GKE.
+
+Context:
+We have an IWS microservice application that needs to build a Docker image and deploy it to a GKE cluster.
+The Jenkins pipeline uses a shared CICD library (iws-cicd-shared) and an IWS shared library (common utilities used across all IWS apps).
+The pipeline is triggered from Jenkins using configuration defined in scm/build_options.txt.
+
+Goal:
+Update and enhance the scm/build_options.txt configuration to include parameters for:
+1. Image build and tagging (including versioning or Git SHA tagging)
+2. Container registry configuration (GCR or Artifact Registry)
+3. Deployment configuration (namespace, environment — NPE/UAT/PROD)
+4. Optional helm or kubectl deployment flags
+5. Environment-specific secrets or credentials references
+
+Requirements:
+- Follow the existing IWS shared library conventions (for example, common build(), deploy(), and promote() functions).
+- Ensure compatibility with the shared CICD library’s build and deploy stages.
+- Include comments in the configuration to explain each key or parameter.
+- Provide an example section for each environment (NPE, UAT, PROD).
+- Make it easy for future developers to extend (e.g., adding new env or changing image repo).
+
+Deliverables:
+1. Updated scm/build_options.txt sample with comments.
+2. Example Jenkins pipeline snippet that reads these options and triggers image build and deploy steps using shared libraries.
+3. Clear explanation of how this ties to GKE deployment (e.g., which function from shared lib to call for deployment).
+
+Please output clean, well-documented YAML- or key-value-based configuration, with code comments explaining each field.
