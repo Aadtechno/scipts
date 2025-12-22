@@ -1,0 +1,116 @@
+#!/bin/bash
+set -o pipefail
+
+############################################
+# Logging
+############################################
+LOG_DIR="/mnt/disks/data/roe/logs/roeReport"
+mkdir -p "$LOG_DIR"
+exec >> "$LOG_DIR/roe_report.log" 2>&1
+
+############################################
+# Usage
+############################################
+usage() {
+  echo "Usage: roeReportFileSweeper -g <gcs_bucket> -a <archive_bucket> -d <gcs_dir> -l <local_dir>"
+  exit 1
+}
+
+############################################
+# Parse arguments
+############################################
+while getopts "g:a:d:l:h" opt; do
+  case "$opt" in
+    g) gcpStorageBucket="$OPTARG" ;;
+    a) gcpStorageBucketArchive="$OPTARG" ;;
+    d) gcpStorageBucketDirectory="$OPTARG" ;;
+    l) reportsDropLocation="$OPTARG" ;;
+    h) usage ;;
+    *) usage ;;
+  esac
+done
+
+############################################
+# Validate inputs
+############################################
+if [[ -z "$gcpStorageBucket" || -z "$gcpStorageBucketArchive" || -z "$gcpStorageBucketDirectory" || -z "$reportsDropLocation" ]]; then
+  echo "$(date) ERROR: Missing required arguments"
+  usage
+fi
+
+if [[ ! -d "$reportsDropLocation" ]]; then
+  echo "$(date) ERROR: Local directory does not exist: $reportsDropLocation"
+  exit 1
+fi
+
+echo "$(date) INFO: Starting ROE Report Sweeper"
+echo "$(date) INFO: Watching directory: $reportsDropLocation"
+
+############################################
+# Main loop (self-healing)
+############################################
+while true; do
+  /usr/bin/inotifywait -m -e create -e moved_to --format "%f" "$reportsDropLocation" |
+  while read -r FILENAME; do
+
+    SRC_FILE="${reportsDropLocation}/${FILENAME}"
+    DEST_PRIMARY="${gcpStorageBucket}/${gcpStorageBucketDirectory}/"
+    DEST_ARCHIVE="${gcpStorageBucketArchive}/${gcpStorageBucketDirectory}/"
+
+    echo "$(date) INFO: Detected file: $FILENAME"
+
+    # Upload to primary bucket
+    if ! /usr/bin/gsutil cp "$SRC_FILE" "$DEST_PRIMARY"; then
+      echo "$(date) ERROR: Failed to upload to primary bucket: $FILENAME"
+      continue
+    fi
+
+    # Upload to archive bucket
+    if ! /usr/bin/gsutil cp "$SRC_FILE" "$DEST_ARCHIVE"; then
+      echo "$(date) ERROR: Failed to upload to archive bucket: $FILENAME"
+      continue
+    fi
+
+    # Remove local file only after success
+    /bin/rm -f "$SRC_FILE"
+    echo "$(date) INFO: Successfully processed and removed: $FILENAME"
+
+  done
+
+  echo "$(date) WARN: inotifywait exited, restarting in 5 seconds..."
+  sleep 5
+done
+-----
+[Unit]
+Description=ROE Report Sweeper Automation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roe
+Group=roe
+
+ExecStart=/bin/bash /home/roe/roeReportFileSweeperScript/roeReportFileSweeper.sh \
+  -g gs://ews-iws-can-prd-roe-data-factory \
+  -a gs://ews-iws-can-prd-roe-archive-data-factory \
+  -d roeReport \
+  -l /mnt/disks/data/twni/roe/ROESAT/sftsectran20/wds/users/0004-00001/511/Active/0004-00000136/in
+
+Restart=always
+RestartSec=10
+KillMode=process
+TimeoutStopSec=30
+
+StandardOutput=append:/mnt/disks/data/roe/logs/roeReport/roe_report_service.log
+StandardError=append:/mnt/disks/data/roe/logs/roeReport/roe_report_service.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+
+----
+journalctl -u roe-report-sweeper -f
