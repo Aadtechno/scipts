@@ -1,6 +1,32 @@
 POD=$(kubectl -n istio-system get pod -l app=ilb-gateway-can-dev -o jsonpath='{.items[0].metadata.name}')
 kubectl -n istio-system get pod $POD -o jsonpath='{.spec.volumes[*].configMap.name}{"\n"}'
 kubectl -n istio-system get pod $POD -o yaml | egrep -n "name: istio-ca-root-cert|name: istiod-ca-cert|root-cert.pem|/var/run/secrets/istio"
+-----
+
+gcloud container clusters describe <CLUSTER_NAME> \
+  --region <REGION> \
+  --project <PROJECT_ID> \
+  --format="yaml(meshConfig)"
+
+kubectl -n istio-system get pods | grep istiod
+
+kubectl logs -n istio-system \
+  $(kubectl -n istio-system get pods -o jsonpath='{.items[0].metadata.name}') \
+  | grep -i meshconfig
+
+
+kubectl exec -it <any-pod> -- \
+  openssl x509 -in /var/run/secrets/istio/root-cert.pem -text | grep Issuer
+
+kubectl -n istio-system get svc istiod
+
+kubectl logs -n istio-system <gateway-pod> | grep Unauthenticated
+
+gcloud container clusters describe <CLUSTER> \
+  --region <REGION> \
+  | grep -i mesh
+
+
 
 
 POD=$(kubectl -n istio-system get pod -l app=ilb-gateway-can-dev -o jsonpath='{.items[0].metadata.name}')
