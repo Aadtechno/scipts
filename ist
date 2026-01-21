@@ -1,0 +1,9 @@
+POD=$(kubectl -n istio-system get pod -l app=ilb-gateway-can-dev -o jsonpath='{.items[0].metadata.name}')
+kubectl -n istio-system get pod $POD -o jsonpath='{.spec.volumes[*].configMap.name}{"\n"}'
+kubectl -n istio-system get pod $POD -o yaml | egrep -n "name: istio-ca-root-cert|name: istiod-ca-cert|root-cert.pem|/var/run/secrets/istio"
+
+
+POD=$(kubectl -n istio-system get pod -l app=ilb-gateway-can-dev -o jsonpath='{.items[0].metadata.name}')
+kubectl -n istio-system get pod $POD -o yaml | egrep -n "configMap:|istio-ca-root-cert|istiod-ca-cert|root-cert.pem|/var/run/secrets/istio|pilotCertProvider"
+
+kubectl -n istio-system get ds ilb-gateway-can-dev -o yaml | egrep -n "configMap:|istio-ca-root-cert|istiod-ca-cert|root-cert.pem|/var/run/secrets/istio"
