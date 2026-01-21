@@ -7,3 +7,15 @@ POD=$(kubectl -n istio-system get pod -l app=ilb-gateway-can-dev -o jsonpath='{.
 kubectl -n istio-system get pod $POD -o yaml | egrep -n "configMap:|istio-ca-root-cert|istiod-ca-cert|root-cert.pem|/var/run/secrets/istio|pilotCertProvider"
 
 kubectl -n istio-system get ds ilb-gateway-can-dev -o yaml | egrep -n "configMap:|istio-ca-root-cert|istiod-ca-cert|root-cert.pem|/var/run/secrets/istio"
+-----
+kubectl -n istio-system get svc | egrep -i "istio|discovery|pilot|control|asm|xds"
+kubectl -n istio-system get pods | egrep -i "istio|discovery|pilot|control|asm|xds"
+
+POD=$(kubectl -n istio-system get pod -l app=ilb-gateway-can-dev -o jsonpath='{.items[0].metadata.name}')
+kubectl -n istio-system exec -it $POD -c istio-proxy -- sh -c 'ps aux | grep -E "pilot-agent|envoy" | head -n 50'
+
+# Check the deployed DaemonSet env/args for anything "istiod" or "discovery"
+kubectl -n istio-system get ds ilb-gateway-can-dev -o yaml | egrep -n "istiod|discovery|xds|15012|PROXY_CONFIG"
+
+# Check the Helm release values (if you can access helm)
+helm -n istio-system get values <YOUR_RELEASE_NAME> -a | egrep -n "istiod|discovery|xds|15012|PROXY_CONFIG"
