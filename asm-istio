@@ -1,0 +1,250 @@
+====================================================================
+GKE + ASM (ISTIO) TRAFFIC FLOW & DEBUG RUNBOOK
+====================================================================
+
+PURPOSE
+-------
+Single reference document for understanding and debugging traffic
+in Google Kubernetes Engine (GKE) with in-cluster Anthos Service Mesh
+(ASM / Istio).
+
+This covers:
+- Internal traffic (Pod → Pod)
+- External traffic (Internet → App)
+- Outbound traffic (Pod → Internet)
+- All critical debug commands used in production.
+
+
+====================================================================
+1. HIGH LEVEL ARCHITECTURE
+====================================================================
+
+External (North-South):
+
+[ Internet ]
+     |
+     v
+[GCP Load Balancer]
+     |
+     v
+[Istio Ingress Gateway (Envoy)]
+     |
+     v
+[Kubernetes Service]
+     |
+     v
+[Envoy Sidecar]
+     |
+     v
+[Application Pod]
+
+Internal (East-West):
+
+Pod A → Envoy A → mTLS → Envoy B → Pod B
+
+
+====================================================================
+2. TRAFFIC TYPES
+====================================================================
+
+Type                Direction       Controlled By
+-------------------------------------------------
+Pod → Pod           East-West        Istio (Envoy)
+Internet → App      North-South      GKE LB + Istio
+Pod → Internet      Egress           Istio (optional)
+
+
+====================================================================
+3. KEY COMPONENTS
+====================================================================
+
+GKE Load Balancer:
+- Provides public IP
+- Health checks
+- No routing logic
+
+Istio Ingress Gateway:
+- Envoy proxy
+- Applies:
+  - Host/path routing
+  - TLS
+  - Authentication
+  - Canary/blue-green
+
+VirtualService:
+- Actual routing rules
+
+DestinationRule:
+- Version selection
+- mTLS behavior
+
+PeerAuthentication:
+- mTLS mode:
+  STRICT / PERMISSIVE / DISABLE
+
+
+====================================================================
+4. INTERNAL TRAFFIC FLOW (POD TO POD)
+====================================================================
+
+Pod A
+ → iptables redirect
+ → Envoy sidecar
+ → mTLS
+ → Envoy sidecar
+ → Pod B
+
+Notes:
+- kube-proxy is bypassed
+- Envoy controls everything
+- Kubernetes Service only provides DNS
+
+
+====================================================================
+5. INGRESS FLOW (EXTERNAL TO APP)
+====================================================================
+
+User → DNS → GKE LB IP
+ → istio-ingressgateway Service
+ → Gateway
+ → VirtualService
+ → DestinationRule
+ → Pod
+
+
+====================================================================
+6. EGRESS FLOW (OUTBOUND)
+====================================================================
+
+Default:
+Pod → Envoy → Node NAT → Internet
+
+With control:
+Pod → Envoy → Egress Gateway → Internet
+
+If outbound is restricted:
+meshConfig:
+  outboundTrafficPolicy:
+    mode: REGISTRY_ONLY
+
+Requires:
+- ServiceEntry
+- Optional EgressGateway
+
+
+====================================================================
+7. INGRESS DEBUG COMMANDS
+====================================================================
+
+Check LoadBalancer:
+kubectl get svc -n istio-system
+
+Check Gateway:
+kubectl get gateway -A
+
+Check VirtualServices:
+kubectl get virtualservice -A
+
+Check which VS uses which Gateway:
+kubectl get virtualservice -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.gateways}{"\n"}{end}'
+
+Check ingress pod:
+kubectl get pods -n istio-system
+kubectl describe pod <gateway-pod>
+
+
+====================================================================
+8. ROUTING DEBUG
+====================================================================
+
+View routes inside Envoy:
+istioctl proxy-config routes <gateway-pod> -n istio-system
+
+View clusters (services):
+istioctl proxy-config clusters <pod>
+
+
+====================================================================
+9. INTERNAL TRAFFIC DEBUG
+====================================================================
+
+Check sidecar injection:
+kubectl get pod <pod> -o jsonpath='{.spec.containers[*].name}'
+
+Must include:
+istio-proxy
+
+Check mTLS:
+kubectl get peerauthentication -A
+kubectl get destinationrule -A
+
+View listeners:
+istioctl proxy-config listeners <pod>
+
+View endpoints:
+istioctl proxy-config endpoints <pod>
+
+
+====================================================================
+10. GOLDEN TROUBLESHOOTING COMMANDS
+====================================================================
+
+These solve 80% of production issues:
+
+kubectl get svc -n istio-system
+kubectl get gateway -A
+kubectl get virtualservice -A
+kubectl get peerauthentication -A
+istioctl proxy-status
+
+
+====================================================================
+11. COMMON FAILURE PATTERNS
+====================================================================
+
+Symptom                         Root Cause
+--------------------------------------------------
+404 from ingress                VS not bound to Gateway
+External works, internal fails  mTLS STRICT
+No external traffic             Ingress Service deleted
+Pods can't talk                 No sidecar injection
+Traffic blackhole               DestinationRule mismatch
+
+
+====================================================================
+12. PRODUCTION SMOKE TESTS
+====================================================================
+
+From inside cluster:
+kubectl run tmp --rm -it --image=curlimages/curl -- sh
+curl http://service-name.namespace
+
+From outside:
+curl -v https://your-domain
+
+
+====================================================================
+13. FINAL MENTAL MODEL
+====================================================================
+
+Layer                    Owner
+-----------------------------------------
+Public IP                GKE
+TLS termination           GKE or Istio
+Routing                  Istio
+Security                 Istio
+Observability             Envoy
+Retries / Timeouts        Envoy
+Canary / Blue-Green       Envoy
+
+
+====================================================================
+ONE SENTENCE TRUTH
+====================================================================
+
+Once ASM is enabled, Kubernetes networking is just plumbing.
+Istio becomes your real network.
+
+If you understand this file, you can debug any
+GKE + ASM incident in production.
+====================================================================
