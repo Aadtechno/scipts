@@ -1,0 +1,180 @@
+====================================================================
+INC DOCUMENT – UAT External Endpoints Down After ILB Recreation
+====================================================================
+
+Incident Summary
+----------------
+UAT external DNS endpoints (for example:
+https://uat.commerce.equifax.ca) are failing after ILB recreation.
+Internal application endpoints inside GKE are working fine.
+
+Root cause has been fully isolated to Akamai/Edge → GKE Origin path.
+
+
+====================================================================
+Environment
+====================================================================
+
+Cluster: iws-can-uat-gke  
+Namespace: can-uat  
+Service Mesh: ASM (Istio)  
+Ingress Type: Internal Load Balancer (ILB)  
+Gateway Service: ilb-gateway-can-uat-external  
+Current ILB IP: 10.153.172.145  
+
+DNS:
+uat.commerce.equifax.ca
+ → CNAME: gnss-iws-can-registration-uat.equifax.ca
+ → A record: 147.146.251.50 (Akamai)
+
+
+====================================================================
+Traffic Flow
+====================================================================
+
+Normal expected flow:
+
+User
+ → Akamai (147.146.251.50)
+ → GKE ILB (10.153.172.145)
+ → Istio Ingress Gateway
+ → VirtualService
+ → Backend Pod
+
+
+====================================================================
+Step-by-Step Isolation Performed
+====================================================================
+
+1. DNS resolution confirmed:
+
+dig +short uat.commerce.equifax.ca
+
+Result:
+gnss-iws-can-registration-uat.equifax.ca
+147.146.251.50
+
+
+2. Direct bypass of Akamai (hit ILB directly):
+
+curl -vk https://10.153.172.145/ -H "Host: uat.commerce.equifax.ca"
+
+Result:
+HTTP/2 200
+server: istio-envoy
+Application HTML returned successfully.
+
+Conclusion:
+GKE, Istio Gateway, routing, services and mTLS are all healthy.
+
+
+3. Through Akamai (DNS endpoint):
+
+curl -vk https://uat.commerce.equifax.ca/
+
+Result:
+TCP connection established to 147.146.251.50
+TLS handshake starts
+No HTTP response (hangs / times out)
+
+Conclusion:
+Akamai receives traffic but cannot reach the GKE origin.
+
+
+====================================================================
+Final Root Cause
+====================================================================
+
+The failure is NOT in:
+
+- Application
+- Kubernetes services
+- Istio Gateway
+- VirtualService
+- mTLS
+- GKE ILB health
+
+The failure IS in:
+
+Akamai / Edge → GKE Origin connectivity
+
+
+====================================================================
+What Changed
+====================================================================
+
+ILB gateway was recreated recently.
+
+Old ILB IP was destroyed.
+New ILB IP is:
+
+10.153.172.145
+
+
+====================================================================
+Why This Broke
+====================================================================
+
+Akamai is still trying to reach:
+
+- Old ILB IP
+OR
+- Wrong port (HTTP vs HTTPS)
+OR
+- Wrong SNI / Host header
+OR
+- Blocked by firewall / routing
+
+So Akamai cannot establish a working origin connection.
+
+
+====================================================================
+Proof (One-Liner Evidence)
+====================================================================
+
+Works:
+curl -vk https://10.153.172.145/ -H "Host: uat.commerce.equifax.ca"
+
+Fails:
+curl -vk https://uat.commerce.equifax.ca/
+
+This mathematically proves:
+Problem is before the gateway, not inside GKE.
+
+
+====================================================================
+Action Required (Network / Akamai Team)
+====================================================================
+
+Please verify Akamai origin configuration for:
+
+Property:
+gnss-iws-can-registration-uat.equifax.ca
+
+Required origin should be:
+10.153.172.145
+
+Please check:
+
+1. Origin IP / hostname
+2. Port (443 preferred)
+3. TLS mode (pass-through or terminate)
+4. SNI / Host header sent to origin
+5. Firewall allow-list to ILB subnet
+
+Until this is updated, all UAT external endpoints will remain broken.
+
+
+====================================================================
+Preventive Recommendation
+====================================================================
+
+Reserve a static ILB IP or maintain DNS-based origin.
+
+Whenever ILB is recreated:
+- Akamai origin MUST be updated immediately.
+
+This is an architectural dependency and expected behavior.
+====================================================================
+
+ILB deleted → new IP allocated → Akamai not updated
