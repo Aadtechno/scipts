@@ -1,0 +1,48 @@
+Act as a Senior SRE/DevOps Engineer and AI Agentic Tooling Architect.
+
+I am new to this repo and have zero knowledge about it. This repo is our organization’s Agentic Dev Toolkit. I have already installed `uv` and ran the `uv` commands mentioned in the repo documentation, but I do not clearly understand what this toolkit does or how I can use it.
+
+Please deeply analyze the entire repository and explain it in a simple, practical way.
+
+Focus on:
+
+1. What this repo is about
+   - Purpose of the toolkit
+   - Main problem it solves
+   - Who is expected to use it
+   - Key modules, folders, files, and entry points
+
+2. How it works technically
+   - Architecture overview
+   - Important Python packages, CLI commands, configs, agents, tools, workflows, and dependencies
+   - How `uv` is used in this project
+   - How to run it locally step by step
+
+3. SRE/DevOps use cases
+   - How I can use this toolkit as an SRE
+   - Practical productivity use cases for Kubernetes, GCP, Jenkins/GitHub Actions, incident response, monitoring, logs, runbooks, RCA, automation, and troubleshooting
+   - Which parts of the repo are immediately useful for SRE work
+
+4. Hands-on guidance
+   - Give me beginner-friendly steps to start using it
+   - Mention exact commands I should run
+   - Explain expected outputs
+   - Tell me how to verify it is working
+   - Tell me common errors and how to fix them
+
+5. Productivity ideas
+   - Suggest 5–10 realistic SRE automation ideas using this toolkit
+   - Rank them from easiest to most valuable
+   - For each idea, explain required repo components and implementation steps
+
+6. Final output format
+   - Executive summary
+   - Repo architecture map
+   - Important files/folders table
+   - Step-by-step local setup
+   - SRE use cases
+   - Recommended first project for me
+   - Risks/security considerations
+   - Questions I should ask the toolkit owners
+
+Please keep the explanation beginner-friendly, but technically accurate. Do not assume I know agentic AI concepts. Explain terms like agent, tool, workflow, MCP, LLM, prompt, orchestration, and uv wherever they appear in the repo.
