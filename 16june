@@ -1,103 +1,139 @@
-I am evaluating a header-based Canary Deployment design for SPA (Angular) applications running on GKE with Istio.
+I need to create a new minimal Angular SPA application to test header-based canary deployment on GKE with Istio.
 
-Current State:
+Please generate the complete working source code and deployment-related files.
 
-* We use standard Kubernetes RollingUpdate deployments.
-* QA often needs to validate releases after deployment, which can require evening/night testing to avoid impacting users.
-* We are exploring a Canary Deployment approach to allow QA testing during business hours.
+Requirement:
 
-Proposed Design:
+1. Application Type
 
-* Stable and Canary versions run simultaneously.
-* Istio VirtualService routes traffic based on a custom HTTP header:
+* Create a minimal Angular single-page application.
+* UI should be simple and clean.
+* The application source code should NOT contain any logic related to canary deployment, stable deployment, Istio routing, or Kubernetes deployment strategy.
+* Canary/stable behavior should be controlled only through image version, Helm values, Kubernetes labels, and Istio routing.
 
-  * No header → Stable version
-  * Header `x-qa-group: beta` → Canary version
-* QA users add the header using tools such as:
+2. UI Requirement
 
-  * ModHeader browser extension
-  * Bruno
-  * Postman
-* After QA approval:
+* Single page UI is enough.
+* Display a simple title such as:
+  `Angular Canary Deployment Test App`
+* At the bottom of the page, display a short build/version text.
+* Example:
+  `Version: 1.0.0`
+  or
+  `Build: stable-1.0.0`
+  or
+  `Build: canary-1.0.1`
+* This version should be configurable during build or image creation, not hardcoded in multiple places.
 
-  * Jenkins promotes the Canary image to Stable.
-  * Canary resources are removed.
-* If QA rejects or a timeout occurs:
+3. Version Handling
 
-  * Canary deployment is automatically cleaned up.
-  * Stable remains active.
+* When the Docker image version/tag is updated, the app should show that version at the bottom of the UI.
+* Please implement a clean approach for injecting the version into the Angular app.
+* Explain how the version value is passed during build.
+* Avoid manually changing source code every time the image version changes.
 
-Environment:
+4. Angular Base Path / Prefix Requirement
 
-* GKE
-* Istio
-* Angular SPA applications
-* Manual browser testing
-* Bruno for API testing
-* NPE/UAT environments
-
-I would like an expert review of this design.
-
-Please evaluate:
-
-1. Is header-based canary the right approach for single page application Angular applications?
-2. What are the major technical risks or operational challenges?
-3. Are there better alternatives that do NOT require a separate DNS hostname?
-4. What issues might occur with:
-
-   * Browser caching
-   * Angular routing
-   * Static assets
-   * API calls
-   * Session management
-   * Authentication
-5. What risks exist if QA forgets to send the header?
-6. How should monitoring be separated between Stable and Canary versions?
-7. What is the best way to prove that traffic routing is working correctly?
-8. What database compatibility concerns should be considered when Stable and Canary run simultaneously?
-9. Would you recommend:
-
-   * Header-based routing
-   * Path-based routing
-   * Cookie-based routing
-   * Percentage traffic canary
-     and why?
-10. If you were a Senior DevOps/SRE reviewing this proposal, what concerns or improvements would you raise before approving it for implementation?
-
-Add this to your prompt:
-
-Additional questions to review:
-
-11. If QA approves the canary deployment, should the canary be promoted to stable immediately, or should it wait until a scheduled deployment window?
-
-Current concern:
-
-* Today deployments happen at night because QA validation is dependent on post-deployment testing.
-* With canary, QA may validate during business hours.
-* After QA approves, should Jenkins automatically promote the canary image to stable right away?
-* Or should Jenkins only mark it as approved and wait for a scheduled production deployment time?
-
-Please explain the pros and cons of both options.
-
-12. For the application URL:
-
-`https://istio.dev.gcp-intl.gcp.kxv/avro-record`
-
-If we use header-based canary routing, what URL will QA use to test the canary?
-
-My understanding is:
-
-* QA will use the same URL:
+* The app will be accessed behind an Istio URL like:
   `https://istio.dev.gcp-intl.gcp.kxv/avro-record`
-* The difference is not the URL.
-* The difference is the request header:
+* Please explain whether Angular needs a base href or deploy URL prefix.
+* Provide a way to configure the path prefix using Helm values.
+* Example prefix:
+  `/avro-record/`
+* The same image should ideally work with different path prefixes if possible.
+* If runtime configuration is needed for base path, explain the best approach.
+* If build-time base href is required, explain clearly why.
+
+5. Docker / Image Build
+
+* Provide a Dockerfile for the Angular app.
+* Use a multi-stage build:
+
+  * Node stage for Angular build
+  * Nginx or company-approved web server image for serving static files
+* Leave placeholders for company GAR base images.
+* Example:
+  `FROM <COMPANY_GAR_NODE_IMAGE> AS build`
+  `FROM <COMPANY_GAR_NGINX_IMAGE> AS runtime`
+* Mention which Node.js version you are choosing and why.
+* Explain compatibility between Angular version and Node.js version.
+* Do not use public Docker Hub images directly in the final answer except as comments/examples.
+
+6. GitHub Workflow
+
+* Create a GitHub Actions workflow to build and bake/push the Docker image.
+* Leave the runner blank or as a placeholder because I will update it.
+* Example:
+  `runs-on: <UPDATE_RUNNER_HERE>`
+* Include placeholders for:
+
+  * GAR registry
+  * project ID
+  * image name
+  * image tag
+  * authentication step
+* The workflow should support passing image tag/version to the Docker build.
+* The same version should be displayed in the Angular UI.
+
+7. Helm Chart
+
+* Provide a minimal Helm chart for deploying the Angular SPA.
+* Include:
+
+  * Deployment
+  * Service
+  * ConfigMap if needed
+  * values.yaml
+* Helm values should allow configuration of:
+
+  * image repository
+  * image tag
+  * replica count
+  * app path prefix such as `/avro-record/`
+  * environment name
+  * app version/build version
+  * labels for stable/canary separation
+* Do not include canary-specific logic inside Angular source code.
+* Canary/stable separation should be done using Helm release name, labels, image tag, and Istio VirtualService.
+
+8. Istio Requirement
+
+* Provide sample Istio VirtualService and DestinationRule examples for header-based routing.
+* Routing behavior:
+
+  * No header → stable deployment
+  * Header `x-qa-group: beta` → canary deployment
+* App URL should remain the same:
+  `https://istio.dev.gcp-intl.gcp.kxv/avro-record`
+* QA should test canary using the same URL with request header:
   `x-qa-group: beta`
+* No separate DNS should be required.
 
-So:
+9. Testing Instructions
 
-* No header → stable version
-* Header `x-qa-group: beta` → canary version
+* Provide commands to test:
 
-Please confirm if this understanding is correct.
+  * Stable without header
+  * Canary with header
+  * Repeated curl test to confirm no accidental canary routing without header
+  * Browser testing using ModHeader
+  * Bruno testing with request header
+* Include commands to verify pods, labels, service endpoints, Istio routes, and logs.
 
-Please provide a detailed architecture review and identify any gaps or blind spots in this approach.
+10. Output Format
+    Please provide:
+
+* Full project folder structure
+* Full source code for all important files
+* Dockerfile
+* GitHub Actions workflow
+* Helm chart files
+* Istio YAML examples
+* Build and deployment commands
+* Testing commands
+* Explanation of Node version choice
+* Explanation of Angular base href/path prefix handling
+* Notes on what should remain outside application source code
+
+Important:
+Act as a Senior DevOps Engineer. Keep the solution production-like but minimal enough for NPE testing.
