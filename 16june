@@ -1,0 +1,103 @@
+I am evaluating a header-based Canary Deployment design for SPA (Angular) applications running on GKE with Istio.
+
+Current State:
+
+* We use standard Kubernetes RollingUpdate deployments.
+* QA often needs to validate releases after deployment, which can require evening/night testing to avoid impacting users.
+* We are exploring a Canary Deployment approach to allow QA testing during business hours.
+
+Proposed Design:
+
+* Stable and Canary versions run simultaneously.
+* Istio VirtualService routes traffic based on a custom HTTP header:
+
+  * No header → Stable version
+  * Header `x-qa-group: beta` → Canary version
+* QA users add the header using tools such as:
+
+  * ModHeader browser extension
+  * Bruno
+  * Postman
+* After QA approval:
+
+  * Jenkins promotes the Canary image to Stable.
+  * Canary resources are removed.
+* If QA rejects or a timeout occurs:
+
+  * Canary deployment is automatically cleaned up.
+  * Stable remains active.
+
+Environment:
+
+* GKE
+* Istio
+* Angular SPA applications
+* Manual browser testing
+* Bruno for API testing
+* NPE/UAT environments
+
+I would like an expert review of this design.
+
+Please evaluate:
+
+1. Is header-based canary the right approach for single page application Angular applications?
+2. What are the major technical risks or operational challenges?
+3. Are there better alternatives that do NOT require a separate DNS hostname?
+4. What issues might occur with:
+
+   * Browser caching
+   * Angular routing
+   * Static assets
+   * API calls
+   * Session management
+   * Authentication
+5. What risks exist if QA forgets to send the header?
+6. How should monitoring be separated between Stable and Canary versions?
+7. What is the best way to prove that traffic routing is working correctly?
+8. What database compatibility concerns should be considered when Stable and Canary run simultaneously?
+9. Would you recommend:
+
+   * Header-based routing
+   * Path-based routing
+   * Cookie-based routing
+   * Percentage traffic canary
+     and why?
+10. If you were a Senior DevOps/SRE reviewing this proposal, what concerns or improvements would you raise before approving it for implementation?
+
+Add this to your prompt:
+
+Additional questions to review:
+
+11. If QA approves the canary deployment, should the canary be promoted to stable immediately, or should it wait until a scheduled deployment window?
+
+Current concern:
+
+* Today deployments happen at night because QA validation is dependent on post-deployment testing.
+* With canary, QA may validate during business hours.
+* After QA approves, should Jenkins automatically promote the canary image to stable right away?
+* Or should Jenkins only mark it as approved and wait for a scheduled production deployment time?
+
+Please explain the pros and cons of both options.
+
+12. For the application URL:
+
+`https://istio.dev.gcp-intl.gcp.kxv/avro-record`
+
+If we use header-based canary routing, what URL will QA use to test the canary?
+
+My understanding is:
+
+* QA will use the same URL:
+  `https://istio.dev.gcp-intl.gcp.kxv/avro-record`
+* The difference is not the URL.
+* The difference is the request header:
+  `x-qa-group: beta`
+
+So:
+
+* No header → stable version
+* Header `x-qa-group: beta` → canary version
+
+Please confirm if this understanding is correct.
+
+Please provide a detailed architecture review and identify any gaps or blind spots in this approach.
